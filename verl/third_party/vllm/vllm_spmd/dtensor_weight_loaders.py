@@ -14,11 +14,344 @@
 # Adapted from https://github.com/vllm-project/vllm/tree/main/vllm/model_executor/model_loader
 
 from typing import Dict
+import itertools
+from collections.abc import Iterable, Mapping
+from itertools import islice
+from typing import Any, Optional, Union
+import torch
+from dataclasses import dataclass, field
+from typing import Any, Callable, Literal, Optional, Protocol, Union, overload
 
 import torch.nn as nn
 from torch.distributed._tensor import DTensor
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 from vllm.model_executor.models.utils import is_pp_missing_parameter
+from typing import Any, Optional, Union
+
+from torch.func import functional_call
+from transformers import PretrainedConfig
+
+import vllm.envs as envs
+from vllm.config import VllmConfig
+from vllm.logger import init_logger
+from vllm.model_executor.model_loader.weight_utils import default_weight_loader
+from vllm.multimodal import MultiModalPlaceholderMap, NestedTensors
+from vllm.sequence import IntermediateTensors
+# from vllm.utils import (get_cuda_view_from_cpu_tensor, is_pin_memory_available,
+#                         is_uva_available)
+
+WeightsMapping = Mapping[str, Optional[str]]
+"""If a key maps to a value of `None`, the corresponding weight is ignored."""
+
+
+@dataclass
+class WeightsMapper:
+    """Maps the name of each weight if they match the following patterns."""
+
+    orig_to_new_substr: WeightsMapping = field(default_factory=dict)
+    orig_to_new_prefix: WeightsMapping = field(default_factory=dict)
+    orig_to_new_suffix: WeightsMapping = field(default_factory=dict)
+
+    def _map_name(self, key: str) -> Optional[str]:
+        for substr, new_key in self.orig_to_new_substr.items():
+            if substr in key:
+                if new_key is None:
+                    return None
+
+                key = key.replace(substr, new_key, 1)
+
+        for prefix, new_key in self.orig_to_new_prefix.items():
+            if key.startswith(prefix):
+                if new_key is None:
+                    return None
+
+                key = key.replace(prefix, new_key, 1)
+
+        for suffix, new_key in self.orig_to_new_suffix.items():
+            if key.endswith(suffix):
+                if new_key is None:
+                    return None
+
+                key = new_key.join(key.rsplit(suffix, 1))
+
+        return key
+
+    def apply(
+        self, weights: Iterable[tuple[str, torch.Tensor]]
+    ) -> Iterable[tuple[str, torch.Tensor]]:
+        return ((out_name, data) for name, data in weights
+                if (out_name := self._map_name(name)) is not None)
+
+    def apply_list(self, values: list[str]) -> list[str]:
+        return [
+            out_name for name in values
+            if (out_name := self._map_name(name)) is not None
+        ]
+
+    def apply_dict(self, values: dict[str, Any]) -> dict[str, Any]:
+        return {
+            out_name: value
+            for name, value in values.items()
+            if (out_name := self._map_name(name)) is not None
+        }
+
+class PPMissingLayer(torch.nn.Identity):
+    """
+    A placeholder layer for missing layers in a pipeline parallel model.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+
+    def forward(self, *args, **kwargs):
+        """Return the first arg from args or the first value from kwargs."""
+        return args[0] if args else next(iter(kwargs.values()))
+
+class AutoWeightsLoader:
+    """
+    Helper class to load weights into a [`torch.nn.Module`][]. It is able
+    to automatically detect child modules and parameters while iterating over
+    the weights only once.
+
+    The weight loading logic for individual modules can be overridden
+    by defining a ``load_weights`` method.
+
+    Similarly, the weight loading logic for individual parameters can be
+    overridden by defining a ``weight_loader`` method.
+
+    Detailed weight loading information can be viewed by setting the
+    environment variable ``VLLM_LOGGING_LEVEL=DEBUG``.
+    """
+
+    # Models trained using early version ColossalAI
+    # may include these tensors in checkpoint. Skip them.
+    ROTARY_EMBEDS_UNUSED_WEIGHTS = [
+        "rotary_emb.inv_freq",
+        "rotary_emb.cos_cached",
+        "rotary_emb.sin_cached",
+    ]
+
+    def __init__(
+        self,
+        module: nn.Module,
+        *,
+        skip_prefixes: Optional[list[str]] = None,
+        skip_substrs: Optional[list[str]] = None,
+        ignore_unexpected_prefixes: Optional[list[str]] = None,
+    ) -> None:
+        super().__init__()
+
+        self.module = module
+        self.skip_prefixes = skip_prefixes or []
+        self.skip_substrs = skip_substrs or []
+        self.ignore_unexpected_prefixes = ignore_unexpected_prefixes or []
+        # update default skip_substrs
+        self.skip_substrs += self.ROTARY_EMBEDS_UNUSED_WEIGHTS
+
+    def _groupby_prefix(
+        self,
+        weights: Iterable[tuple[str, torch.Tensor]],
+    ) -> Iterable[tuple[str, Iterable[tuple[str, torch.Tensor]]]]:
+        weights_by_parts = ((weight_name.split(".", 1), weight_data)
+                            for weight_name, weight_data in weights)
+
+        for prefix, group in itertools.groupby(weights_by_parts,
+                                               key=lambda x: x[0][0]):
+            yield (
+                prefix,
+                # Because maxsplit=1 in weight_name.split(...),
+                # the length of `parts` must either be 1 or 2
+                (("" if len(parts) == 1 else parts[1], weights_data)
+                 for parts, weights_data in group),
+            )
+
+    def _get_qualname(self, prefix: str, rest: str) -> str:
+        if prefix == "":
+            return rest
+        if rest == "":
+            return prefix
+
+        return ".".join((prefix, rest))
+
+    def _can_skip(self, qualname: str) -> bool:
+        return (any(qualname.startswith(p) for p in self.skip_prefixes)
+                or any(substr in qualname for substr in self.skip_substrs))
+
+    def _can_ignore_unexpected(self, qualname: str) -> bool:
+        return any(
+            qualname.startswith(p) for p in self.ignore_unexpected_prefixes)
+
+    def _load_param(
+        self,
+        base_prefix: str,
+        param: nn.Parameter,
+        weights: Iterable[tuple[str, torch.Tensor]],
+    ) -> Iterable[str]:
+        for weight_name, weight_data in weights:
+            weight_qualname = self._get_qualname(base_prefix, weight_name)
+
+            if self._can_skip(weight_qualname):
+                logger.debug("Skipping weight %s", weight_qualname)
+
+                continue
+
+            if weight_name != "":
+                if self._can_ignore_unexpected(weight_qualname):
+                    logger.debug("Ignoring weight %s", weight_qualname)
+
+                    continue
+
+                raise ValueError(
+                    f"Attempted to load nested weight '{weight_qualname}' "
+                    f"into a single parameter '{base_prefix}'")
+
+            weight_loader = getattr(param, "weight_loader",
+                                    default_weight_loader)
+            weight_loader(param, weight_data)
+
+            logger.debug("Loaded weight %s with shape %s", weight_qualname,
+                         param.shape)
+
+            yield weight_qualname
+
+    def _add_loadable_non_param_tensors(self, module: nn.Module,
+                                        child_params: dict[str, torch.Tensor]):
+        """
+        Add tensor names that are not in the model params that may be in the
+        safetensors, e.g., batch normalization stats.
+        """
+        if isinstance(module, (
+                nn.BatchNorm1d,
+                nn.BatchNorm2d,
+                nn.BatchNorm3d,
+                nn.LazyBatchNorm1d,
+                nn.LazyBatchNorm2d,
+                nn.LazyBatchNorm3d,
+                nn.SyncBatchNorm,
+        )):
+            module_state_dict = module.state_dict()
+            for stat_name in ("running_mean", "running_var",
+                              "num_batches_tracked"):
+                child_params[stat_name] = module_state_dict[stat_name]
+
+    def _load_module(
+        self,
+        base_prefix: str,
+        module: nn.Module,
+        weights: Iterable[tuple[str, torch.Tensor]],
+    ) -> Iterable[str]:
+        if isinstance(module, PPMissingLayer):
+            return
+
+        # Avoid infinite recursion since this function is typically
+        # called inside load_weights of the module itself
+        if module != self.module:
+            module_load_weights = getattr(module, "load_weights", None)
+            if callable(module_load_weights):
+                loaded_params = module_load_weights(weights)
+                if loaded_params is None:
+                    logger.warning(
+                        "Unable to collect loaded parameters "
+                        "for module %s", module)
+                else:
+                    yield from map(
+                        lambda x: self._get_qualname(base_prefix, x),
+                        loaded_params,
+                    )
+
+        child_modules = dict(module.named_children())
+        child_params = dict(module.named_parameters(recurse=False))
+
+        # Add missing tensors the weight loader needs to be able to load
+        # that aren't registered as params, e.g., batchnorm statistics.
+        self._add_loadable_non_param_tensors(module, child_params)
+
+        for child_prefix, child_weights in self._groupby_prefix(weights):
+            prefix = self._get_qualname(base_prefix, child_prefix)
+
+            if child_prefix in child_modules:
+                if self._can_skip(prefix + "."):
+                    logger.debug("Skipping module %s", prefix)
+
+                    continue
+
+                yield from self._load_module(prefix,
+                                             child_modules[child_prefix],
+                                             child_weights)
+            elif child_prefix in child_params:
+                if self._can_skip(prefix):
+                    logger.debug("Skipping param %s", prefix)
+
+                    continue
+
+                yield from self._load_param(prefix, child_params[child_prefix],
+                                            child_weights)
+            else:
+                can_skip_module = self._can_skip(prefix + ".")
+                can_skip_param = self._can_skip(prefix)
+                if can_skip_module or can_skip_param:
+                    logger.debug("Skipping missing %s", prefix)
+
+                    continue
+
+                can_ignore_module = self._can_ignore_unexpected(prefix + ".")
+                can_ignore_param = self._can_ignore_unexpected(prefix)
+                if can_ignore_module or can_ignore_param:
+                    logger.debug("Ignoring missing %s", prefix)
+
+                    continue
+
+                msg = (f"There is no module or parameter named '{prefix}' "
+                       f"in {type(self.module).__name__}")
+                raise ValueError(msg)
+
+    def load_weights(
+        self,
+        weights: Iterable[tuple[str, torch.Tensor]],
+        *,
+        mapper: Optional[WeightsMapper] = None,
+    ) -> set[str]:
+        if mapper is not None:
+            weights = mapper.apply(weights)
+        # filter out weights with first-prefix/substr to skip in name
+        weights = ((name, weight) for name, weight in weights
+                   if not self._can_skip(name))
+
+        autoloaded_weights = set(self._load_module("", self.module, weights))
+        return autoloaded_weights
+
+class DTensorAutoWeightsLoader(AutoWeightsLoader):
+    """AutoWeightsLoader that redistributes DTensor to a local tensor before loading."""
+    def _load_param(
+        self,
+        base_prefix: str,
+        param: nn.Parameter,
+        weights: Iterable[tuple[str, torch.Tensor]],
+    ) -> Iterable[str]:
+        for weight_name, weight_data in weights:
+            weight_qualname = self._get_qualname(base_prefix, weight_name)
+
+            if self._can_skip(weight_qualname):
+                continue
+
+            if weight_name != "":
+                if self._can_ignore_unexpected(weight_qualname):
+                    continue
+                raise ValueError(
+                    f"Attempted to load nested weight '{weight_qualname}' "
+                    f"into a single parameter '{base_prefix}'"
+                )
+
+            # DTensor -> local tensor using the FULL qualname
+            local_loaded_weight = redistribute_dtensor(
+                param_name=weight_qualname,
+                loaded_weights=weight_data,
+            )
+
+            weight_loader = getattr(param, "weight_loader", default_weight_loader)
+            weight_loader(param, local_loaded_weight.to(dtype=param.dtype))
+
+            yield weight_qualname
 
 
 def gemma_dtensor_weight_loader(actor_weights: Dict, vllm_model: nn.Module) -> nn.Module:
@@ -183,6 +516,40 @@ def qwen2_dtensor_weight_loader(actor_weights: Dict, vllm_model: nn.Module) -> n
             local_loaded_weight = redistribute_dtensor(param_name=name, loaded_weights=loaded_weight)
             weight_loader = getattr(param, "weight_loader", default_weight_loader)
             weight_loader(param, local_loaded_weight.to(dtype=param.dtype))
+
+def oldy_load_weights(self, weights: Iterable[tuple[str,
+                                                torch.Tensor]]) -> set[str]:
+    loader = AutoWeightsLoader(
+        self,
+        skip_prefixes=(["lm_head."]
+                        if self.config.tie_word_embeddings else None),
+    )
+    return loader.load_weights(weights)
+
+def qwen3_dtensor_weight_loader(actor_weights: Dict, vllm_model: nn.Module) -> nn.Module:
+    """
+    DTensor weight loader for Qwen3 model in VERL.
+    
+    Args:
+        actor_weights: Dictionary of weight names to tensors
+        vllm_model: The vLLM model instance
+    
+    Returns:
+        The vLLM model with loaded weights
+    """
+
+    
+    weights_iter = iter(actor_weights.items())
+    skip_prefixes = ["lm_head."] if vllm_model.config.tie_word_embeddings else None
+    
+    loader = DTensorAutoWeightsLoader(
+        vllm_model,
+        skip_prefixes=skip_prefixes,
+    )
+    
+    loaded_params = loader.load_weights(weights_iter)
+    
+
 
 
 def qwen2vl_dtensor_weight_loader(actor_weights: Dict, vllm_model: nn.Module) -> nn.Module:
@@ -353,6 +720,7 @@ __MODEL_DTENSOR_WEIGHT_LOADER_REGISTRY__ = {
     "GPTBigCodeForCausalLM": gptbigcode_dtensor_load_weights,
     "Starcoder2ForCausalLM": starcoder2_dtensor_load_weights,
     "Qwen2ForCausalLM": qwen2_dtensor_weight_loader,
+    "TransformersModel": qwen3_dtensor_weight_loader,
     "DeepseekV2ForCausalLM": deepseekv2_dtensor_weight_loader,
     "Qwen2VLForConditionalGeneration": qwen2vl_dtensor_weight_loader,
 }

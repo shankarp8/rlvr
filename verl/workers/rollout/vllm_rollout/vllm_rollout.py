@@ -189,6 +189,9 @@ class vLLMRollout(BaseRollout):
         response = output[0].to(idx.device)
         log_probs = output[1].to(idx.device)
 
+
+
+
         if response.shape[1] < self.config.response_length:
             response = pad_sequence_to_length(response, self.config.response_length, self.pad_token_id)
             log_probs = pad_sequence_to_length(log_probs, self.config.response_length, self.pad_token_id)
@@ -203,6 +206,8 @@ class vLLMRollout(BaseRollout):
         response_length = response.size(1)
         delta_position_id = torch.arange(1, response_length + 1, device=position_ids.device)
         delta_position_id = delta_position_id.unsqueeze(0).repeat(batch_size, 1)
+
+        # if prompts.meta_info['vary_confidence'] or True:
 
         # TODO(sgm): fix position_ids on right_pad
         # prompt: left pad + response: right pad

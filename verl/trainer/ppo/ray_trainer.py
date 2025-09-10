@@ -155,7 +155,8 @@ def compute_advantage(data: DataProto, adv_estimator, gamma=1.0, lam=1.0, num_re
         response_mask = attention_mask[:, -response_length:]
         advantages, returns = core_algos.compute_grpo_outcome_advantage(token_level_rewards=token_level_rewards,
                                                                         eos_mask=response_mask,
-                                                                        index=index)
+                                                                        index=index,
+                                                                        std_norm=config.algorithm.std_norm)
         data.batch['advantages'] = advantages
         data.batch['returns'] = returns
     elif adv_estimator == 'reinforce_plus_plus':
@@ -209,6 +210,7 @@ def _compute_response_info(batch):
         prompt_length=prompt_length,
         response_length=response_length,
     )
+
 
 
 def compute_data_metrics(batch, use_critic=True):
@@ -672,11 +674,123 @@ class RayPPOTrainer(object):
         wandb.log({"generations": new_table}, step=self.global_steps)
         self.validation_table = new_table
 
+    # def _validate(self):
+    #     reward_tensor_lst = []
+    #     data_source_lst = []
+    #     compontent_records_lst = []
+
+    #     # Lists to collect samples for the table
+    #     sample_inputs = []
+    #     sample_outputs = []
+    #     sample_scores = []
+
+    #     for test_data in self.val_dataloader:
+    #         test_batch = DataProto.from_single_dict(test_data)
+            
+    #         # we only do validation on rule-based rm
+    #         if self.config.reward_model.enable and test_batch[0].non_tensor_batch['reward_model']['style'] == 'model':
+    #             return {}
+
+    #         n_val_samples = self.config.actor_rollout_ref.rollout.n_val
+    #         test_batch = test_batch.repeat(repeat_times=n_val_samples, interleave=True)
+            
+    #         # Store original inputs
+    #         input_ids = test_batch.batch['input_ids']
+    #         input_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in input_ids]
+    #         sample_inputs.extend(input_texts)
+
+    #         test_gen_batch = test_batch.pop(['input_ids', 'attention_mask', 'position_ids'])
+    #         test_gen_batch.meta_info = {
+    #             'eos_token_id': self.tokenizer.eos_token_id,
+    #             'pad_token_id': self.tokenizer.pad_token_id,
+    #             'recompute_log_prob': False,
+    #             'do_sample': False,
+    #             'validate': True,
+    #             'vary_confidence': False,
+    #             'num_duplicated_rollouts': 1
+    #         }
+
+    #         # pad to be divisible by dp_size
+    #         test_gen_batch_padded, pad_size = pad_dataproto_to_divisor(test_gen_batch, self.actor_rollout_wg.world_size)
+    #         test_output_gen_batch_padded = self.actor_rollout_wg.generate_sequences(test_gen_batch_padded)
+    #         # unpad
+    #         test_output_gen_batch = unpad_dataproto(test_output_gen_batch_padded, pad_size=pad_size)
+    #         print('validation generation end')
+
+    #         # Store generated outputs
+    #         output_ids = test_output_gen_batch.batch['responses']
+    #         output_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in output_ids]
+    #         sample_outputs.extend(output_texts)
+
+    #         test_batch = test_batch.union(test_output_gen_batch)
+
+    #         # evaluate using reward_function
+    #         reward_tensor, score_record, component_records = self.val_reward_fn(test_batch)
+
+    #         # Store scores
+    #         scores = reward_tensor.sum(-1).cpu().tolist()
+    #         sample_scores.extend(scores)
+
+    #         reward_tensor_lst.append(reward_tensor)
+    #         data_source_lst.append(test_batch.non_tensor_batch.get('data_source', ['unknown'] * reward_tensor.shape[0]))
+
+    #     self._maybe_log_val_generations_to_wandb(inputs=sample_inputs, outputs=sample_outputs, scores=sample_scores)
+
+    #     reward_tensor = torch.cat(reward_tensor_lst, dim=0).sum(-1).cpu()  # (batch_size,)
+    #     data_sources = np.concatenate(data_source_lst, axis=0)
+
+    #     # evaluate test_score based on data source
+    #     data_source_reward = {}
+    #     for i in range(reward_tensor.shape[0]):
+    #         data_source = data_sources[i]
+    #         if data_source not in data_source_reward:
+    #             data_source_reward[data_source] = []
+    #         data_source_reward[data_source].append(reward_tensor[i].item())
+
+    #     metric_dict = {}
+    #     for data_source, rewards in data_source_reward.items():
+    #         mean_reward = np.mean(rewards)
+    #         metric_dict[f'val/test_score/{data_source}'] = mean_reward
+            
+    #         # Store validation accuracy by data source and step
+    #         if data_source not in self.validation_accuracy_by_source:
+    #             self.validation_accuracy_by_source[data_source] = {}
+    #         self.validation_accuracy_by_source[data_source][self.global_steps] = mean_reward
+
+    #     return metric_dict
     def _validate(self):
+        def summarize_component_records(component_records, prefix="reward_components"):
+                if not component_records:
+                    return {}
+
+                keys = set()
+                for d in component_records:
+                    keys.update(k for k in d.keys() if isinstance(d.get(k), (int, float)))
+
+                import numpy as np
+                arrays = {k: [] for k in keys}
+                for d in component_records:
+                    for k in keys:
+                        v = d.get(k, None)
+                        if isinstance(v, (int, float)):
+                            arrays[k].append(float(v))
+
+                out = {}
+                for k, vals in arrays.items():
+                    if not vals:
+                        continue
+                    a = np.array(vals, dtype=np.float32)
+                    out[f"{prefix}/{k}/mean"] = float(a.mean())
+                    if k in ['verbalized_confidence', 'acc'] or 'brier' in k or 'verbalized' in k:
+                        out[f"{prefix}/{k}/min"]  = float(a.min())
+                        out[f"{prefix}/{k}/max"]  = float(a.max())
+                        out[f"{prefix}/{k}/std"]  = float(a.std())
+                        # out[f"{prefix}/{k}/length"]  = float(len(a))
+                return out
         reward_tensor_lst = []
         data_source_lst = []
+        component_records_all = []  
 
-        # Lists to collect samples for the table
         sample_inputs = []
         sample_outputs = []
         sample_scores = []
@@ -684,14 +798,12 @@ class RayPPOTrainer(object):
         for test_data in self.val_dataloader:
             test_batch = DataProto.from_single_dict(test_data)
             
-            # we only do validation on rule-based rm
             if self.config.reward_model.enable and test_batch[0].non_tensor_batch['reward_model']['style'] == 'model':
                 return {}
 
             n_val_samples = self.config.actor_rollout_ref.rollout.n_val
             test_batch = test_batch.repeat(repeat_times=n_val_samples, interleave=True)
             
-            # Store original inputs
             input_ids = test_batch.batch['input_ids']
             input_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in input_ids]
             sample_inputs.extend(input_texts)
@@ -703,38 +815,41 @@ class RayPPOTrainer(object):
                 'recompute_log_prob': False,
                 'do_sample': False,
                 'validate': True,
+                'vary_confidence': False,
+                'num_duplicated_rollouts': 1
             }
 
-            # pad to be divisible by dp_size
             test_gen_batch_padded, pad_size = pad_dataproto_to_divisor(test_gen_batch, self.actor_rollout_wg.world_size)
             test_output_gen_batch_padded = self.actor_rollout_wg.generate_sequences(test_gen_batch_padded)
-            # unpad
+
             test_output_gen_batch = unpad_dataproto(test_output_gen_batch_padded, pad_size=pad_size)
             print('validation generation end')
 
-            # Store generated outputs
             output_ids = test_output_gen_batch.batch['responses']
             output_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in output_ids]
             sample_outputs.extend(output_texts)
 
             test_batch = test_batch.union(test_output_gen_batch)
 
-            # evaluate using reward_function
-            reward_tensor, score_record= self.val_reward_fn(test_batch)
+            reward_tensor, score_record, component_records = self.val_reward_fn(test_batch, parallel_confidence=False)
 
-            # Store scores
             scores = reward_tensor.sum(-1).cpu().tolist()
             sample_scores.extend(scores)
 
             reward_tensor_lst.append(reward_tensor)
             data_source_lst.append(test_batch.non_tensor_batch.get('data_source', ['unknown'] * reward_tensor.shape[0]))
 
+            if component_records is not None:
+                if isinstance(component_records, (list, tuple)):
+                    component_records_all.extend(component_records)
+                elif isinstance(component_records, dict):
+                    component_records_all.extend([component_records] * reward_tensor.shape[0])
+
         self._maybe_log_val_generations_to_wandb(inputs=sample_inputs, outputs=sample_outputs, scores=sample_scores)
 
-        reward_tensor = torch.cat(reward_tensor_lst, dim=0).sum(-1).cpu()  # (batch_size,)
+        reward_tensor = torch.cat(reward_tensor_lst, dim=0).sum(-1).cpu()  
         data_sources = np.concatenate(data_source_lst, axis=0)
 
-        # evaluate test_score based on data source
         data_source_reward = {}
         for i in range(reward_tensor.shape[0]):
             data_source = data_sources[i]
@@ -747,12 +862,25 @@ class RayPPOTrainer(object):
             mean_reward = np.mean(rewards)
             metric_dict[f'val/test_score/{data_source}'] = mean_reward
             
-            # Store validation accuracy by data source and step
             if data_source not in self.validation_accuracy_by_source:
                 self.validation_accuracy_by_source[data_source] = {}
             self.validation_accuracy_by_source[data_source][self.global_steps] = mean_reward
 
+        metric_dict.update(summarize_component_records(component_records_all, prefix="reward_components"))
+
+        if component_records_all:
+            per_source_components = {}
+            for i, cr in enumerate(component_records_all):
+                src = data_sources[i] if i < len(data_sources) else 'unknown'
+                per_source_components.setdefault(src, []).append(cr)
+
+            for src, cr_list in per_source_components.items():
+                metric_dict.update(
+                    summarize_component_records(cr_list, prefix=f"reward_components_by_source/{src}")
+                )
+
         return metric_dict
+
 
     def init_workers(self):
         """Init resource pool and worker group"""
@@ -1001,6 +1129,7 @@ class RayPPOTrainer(object):
         from verl.utils.tracking import Tracking
         from omegaconf import OmegaConf
 
+
         logger = Tracking(project_name=self.config.trainer.project_name,
                           experiment_name=self.config.trainer.experiment_name,
                           default_backend=self.config.trainer.logger,
@@ -1012,6 +1141,25 @@ class RayPPOTrainer(object):
         self._load_checkpoint()
 
         self._save_checkpoint()
+        import math
+
+        def decay_prob(step, max_steps, p_init=1.0, p_final=0.1, schedule="exponential"):
+            step = min(step, max_steps)  
+
+            if schedule == "linear":
+                return p_init + (p_final - p_init) * (step / max_steps)
+
+            elif schedule == "exponential":
+                decay_rate = math.log(p_final / p_init) / max_steps
+                return p_init * math.exp(decay_rate * step)
+
+            elif schedule == "cosine":
+                cos_inner = math.pi * step / max_steps
+                return p_final + 0.5 * (p_init - p_final) * (1 + math.cos(cos_inner))
+
+            else:
+                raise ValueError("Unknown schedule: choose 'linear', 'exponential', or 'cosine'")
+
 
         # perform validation before training
         # currently, we only support validation using the reward_function.
@@ -1032,6 +1180,9 @@ class RayPPOTrainer(object):
 
         for epoch in range(self.config.trainer.total_epochs):
             for batch_dict in self.train_dataloader:
+                prob = decay_prob(self.global_steps, self.total_training_steps / 2, p_init=0.8, p_final=0.05, schedule='cosine')
+                # if self.global_steps >= self.total_training_steps // 2:
+                #     prob = 0.0
                 metrics = {}
                 timing_raw = {}
 
@@ -1043,6 +1194,17 @@ class RayPPOTrainer(object):
                 with _timer('step', timing_raw):
                     # generate a batch
                     with _timer('gen', timing_raw):
+                        if not self.config.trainer.vary_confidence:
+                            vary_confidence = False
+                        else:
+                            import random 
+                            test = random.uniform(0.0, 1.0)
+                            if test < prob:
+                                vary_confidence = True
+                            else:
+                                vary_confidence = False
+                        gen_batch.meta_info['vary_confidence'] = vary_confidence
+                        gen_batch.meta_info['num_duplicated_rollouts'] = self.config.trainer.num_duplicated_rollouts
                         gen_batch_output = self.actor_rollout_wg.generate_sequences(gen_batch)
 
                     if self.config.algorithm.adv_estimator == 'remax':
@@ -1052,7 +1214,7 @@ class RayPPOTrainer(object):
                             gen_baseline_output = self.actor_rollout_wg.generate_sequences(gen_baseline_batch)
 
                             batch = batch.union(gen_baseline_output)
-                            reward_baseline_tensor, score_record = self.reward_fn(batch)
+                            reward_baseline_tensor, score_record, component_records = self.reward_fn(batch)
                             reward_baseline_tensor = reward_baseline_tensor.sum(dim=-1)
 
                             batch.pop(batch_keys=list(gen_baseline_output.batch.keys()))
@@ -1064,7 +1226,14 @@ class RayPPOTrainer(object):
                     batch.non_tensor_batch['uid'] = np.array([str(uuid.uuid4()) for _ in range(len(batch.batch))],
                                                              dtype=object)
                     # repeat to align with repeated responses in rollout
-                    batch = batch.repeat(repeat_times=self.config.actor_rollout_ref.rollout.n, interleave=True)
+                    if vary_confidence:
+                        num_repeat = self.config.actor_rollout_ref.rollout.n * self.config.trainer.num_duplicated_rollouts
+                    else:
+                        num_repeat = self.config.actor_rollout_ref.rollout.n
+                    
+                    batch.meta_info['num_rollouts'] = self.config.actor_rollout_ref.rollout.n
+                        
+                    batch = batch.repeat(repeat_times=num_repeat, interleave=True)
                     batch = batch.union(gen_batch_output)
 
                     # balance the number of valid tokens on each dp rank.
@@ -1102,9 +1271,49 @@ class RayPPOTrainer(object):
                             batch = batch.union(reward_tensor)
                             
                         # we combine with rule-based rm
-                        reward_tensor, score_record = self.reward_fn(batch)
+                        parallel_confidence = self.config.trainer.parallel_confidence
+                        reward_tensor, score_record, component_records = self.reward_fn(batch, parallel_confidence=parallel_confidence)
                         score_records.extend(score_record)
                         batch.batch['token_level_scores'] = reward_tensor
+                        metrics.update({
+                            "vary_confidence": vary_confidence,
+                        })
+                        def summarize_component_records(component_records, prefix="reward_components"):
+                                if not component_records:
+                                    return {}
+
+                                keys = set()
+                                for d in component_records:
+                                    keys.update(k for k in d.keys() if isinstance(d.get(k), (int, float)))
+
+                                import numpy as np
+                                arrays = {k: [] for k in keys}
+                                for d in component_records:
+                                    for k in keys:
+                                        v = d.get(k, None)
+                                        if isinstance(v, (int, float)):
+                                            arrays[k].append(float(v))
+
+                                out = {}
+                                for k, vals in arrays.items():
+                                    if not vals:
+                                        continue
+                                    a = np.array(vals, dtype=np.float32)
+                                    out[f"{prefix}/{k}/mean"] = float(a.mean())
+                                    if k in ['verbalized_confidence', 'acc'] or 'brier' in k or 'verbalized' in k:
+                                        out[f"{prefix}/{k}/min"]  = float(a.min())
+                                        out[f"{prefix}/{k}/max"]  = float(a.max())
+                                        out[f"{prefix}/{k}/std"]  = float(a.std())
+                                        import scipy
+                                        if 'verbalized' in k:
+                                            out[f"{prefix}/{k}/IQR"]  = float(np.percentile(a, 75) - np.percentile(a, 25))
+                                            out[f"{prefix}/{k}/skew"] = float(scipy.stats.skew(a))
+                                            out[f"{prefix}/{k}/kurtosis"] = float(scipy.stats.kurtosis(a))
+                                        # out[f"{prefix}/{k}/length"]  = float(len(a))
+                                return out
+
+                        comp_metrics = summarize_component_records(component_records, prefix="reward_components")
+                        metrics.update(comp_metrics)
 
                         # compute rewards. apply_kl_penalty if available
                         if not self.config.actor_rollout_ref.actor.get('use_kl_loss', False):
@@ -1152,8 +1361,9 @@ class RayPPOTrainer(object):
 
                     if self.config.trainer.save_freq > 0 and \
                             self.global_steps % self.config.trainer.save_freq == 0:
-                        with _timer('save_checkpoint', timing_raw):
-                            self._save_checkpoint()
+                        if self.global_steps != 0:
+                            with _timer('save_checkpoint', timing_raw):
+                                self._save_checkpoint()
 
                     if self.config.trainer.save_freq > 0 and self.global_steps % self.config.trainer.save_freq == 0:
                         self._save_history_accuracy(self.history_accuracy)

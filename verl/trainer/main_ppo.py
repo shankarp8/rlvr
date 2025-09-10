@@ -17,7 +17,7 @@ Note that we don't combine the main with ray_trainer as ray_trainer is used by o
 from verl.trainer.ppo.ray_trainer import RayPPOTrainer
 import ray
 import hydra
-from verl.utils.reward_score import deepscaler
+from verl.utils.reward_score import deepscaler, calibration
 
 @hydra.main(config_path='config', config_name='ppo_trainer', version_base=None)
 def main(config):
@@ -25,6 +25,54 @@ def main(config):
 
 
 def run_ppo(config, compute_score=None):
+    from omegaconf import OmegaConf
+    def dump_blocks(cfg):
+        # Likely homes of worker/engine counts
+        paths = [
+            "actor_rollout_ref", 
+            "actor_rollout_ref.actor",
+            "actor_rollout_ref.rollout",
+            "actor_rollout_ref.rollout.ray_actor_options",
+            "actor_rollout_ref.rollout.engine",
+            "actor_rollout_ref.rollout.vllm",
+            "actor_rollout_ref.rollout.vllm_args",
+            "actor_rollout_ref.rollout_worker",      # some versions
+            "actor_rollout_ref.rollout_workers",     # some versions
+            "actor_rollout_ref.ray",                 # some versions
+            "trainer",
+            "trainer.rollout",
+            "trainer.resource",
+            "resource",                              # some versions
+        ]
+        for p in paths:
+            try:
+                node = OmegaConf.select(cfg, p)
+                if node is not None:
+                    print(f"\n=== {p} ===")
+                    print(OmegaConf.to_yaml(node))
+            except Exception:
+                pass
+
+        # Quick scan for any literal 8 in numeric leaves
+        print("\n=== keys with value 8 (possible culprit) ===")
+        def walk(base_path, node):
+            if isinstance(node, (dict,)) or hasattr(node, "keys"):
+                for k in list(node.keys()):
+                    walk(f"{base_path}.{k}" if base_path else k, node[k])
+            else:
+                try:
+                    if int(node) == 8:
+                        print(base_path, "=", node)
+                except Exception:
+                    pass
+        walk("", OmegaConf.to_container(cfg, resolve=True))
+
+    # dump_blocks(config)
+
+    # # Pretty-print the whole thing
+    # # print(OmegaConf.to_yaml(config.actor_rollout_ref.rollout))
+    # blob
+
     if not ray.is_initialized():
         # this is for local ray cluster
         ray.init(runtime_env={'env_vars': {'TOKENIZERS_PARALLELISM': 'true', 'NCCL_DEBUG': 'WARN'}})
@@ -111,7 +159,7 @@ def main_task(config, compute_score=None):
     # if config.actor_rollout_ref.model.path.strip().startswith("Qwen") or config.actor_rollout_ref.model.path.strip().startswith("meta-llama"):
     if config.actor_rollout_ref.model.path.strip().startswith("Qwen") or 'llama' in config.actor_rollout_ref.model.path.lower() or config.actor_rollout_ref.model.use_think == False:
         print("\nQwen or LLAMA---------------------------------\n")
-        compute_score = deepscaler.compute_score
+        compute_score = calibration.compute_score
         
     reward_fn = reward_manager_cls(tokenizer=tokenizer, num_examine=0, compute_score=compute_score)
 

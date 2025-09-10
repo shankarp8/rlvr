@@ -33,6 +33,8 @@ def _default_compute_score(data_source, solution_str, ground_truth, extra_info=N
     elif data_source in ['deepscaler', 'aime', 'amc', 'math', 'minerva', 'olympiad']:
         from . import deepscaler
         res = deepscaler.compute_score("", solution_str, ground_truth, extra_info, use_think=True)
+    elif data_source in ['calibration']:
+        res = calibration.compute_score(data_source, solution_str, ground_truth, extra_info)
     else:
         raise NotImplementedError
 

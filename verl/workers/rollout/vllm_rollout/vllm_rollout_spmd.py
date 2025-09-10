@@ -127,6 +127,7 @@ class vLLMRollout(BaseRollout):
         self.sampling_params = SamplingParams(**kwargs)
 
         self.pad_token_id = tokenizer.pad_token_id
+        self.tokenizer = tokenizer
 
     @contextmanager
     def update_sampling_params(self, **kwargs):
@@ -186,20 +187,185 @@ class vLLMRollout(BaseRollout):
 
         # TODO(sgm): disable logprob when recompute_log_prob is enable
         # if n = 1: (bs, response_length) ; if n > 1: (bs * n, response_length)
-
         response = []
         for output in outputs:
             for sample_id in range(len(output.outputs)):
                 response.append(output.outputs[sample_id].token_ids)
 
+        if prompts.meta_info['vary_confidence']:
+            
+            assert len(response) % self.config.n == 0
+            num_exs = len(response) // self.config.n
+            groups = [response[i:i+self.config.n] for i in range(0, len(response), self.config.n)]
+
+            new_responses = []
+            for ids in response:
+                for _ in range(prompts.meta_info['num_duplicated_rollouts']):
+                    new_responses.append(list(ids)) 
+
+            import re
+
+            def _first_block(s, tag):
+                blocks = re.findall(fr'<{tag}>(.*?)</{tag}>', s, flags=re.DOTALL | re.IGNORECASE)
+                return blocks[0].strip() if blocks else None
+            def _parse_confidence(text):
+                import re, math
+                m = re.search(r'[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?', text)
+                if not m:
+                    return 0.0
+                q = float(m.group(0))
+                return q
+
+            # def _find_subseq(tokens: List[str], pattern: List[str]) -> int:
+            #     n, m = len(tokens), len(pattern)
+            #     for i in range(n - m + 1):
+            #         if tokens[i:i+m] == pattern:
+            #             return i
+            #     return -1
+            def _sample_diverse_values(conf, n, existing, min_gap=0.1, tries_per_item=100):
+                out = []
+                side1 = (0.0, 0.5) if conf >= 0.5 else (0.5, 1.0)
+                side2 = (0.5, 1.0) if conf >= 0.5 else (0.0, 0.5)
+
+                grid = [round(x / 10.0, 1) for x in range(11)]
+
+                existing = set(round(v, 1) for v in existing if v is not None)
+
+                def is_ok(x, tol):
+                    return all(abs(x - v) >= tol - 1e-12 for v in existing)
+
+                for k in range(n):
+                    tol = min_gap
+                    side = side1 if k == 0 else (side2 if k % 2 else side1)
+                    picked = None
+
+                    for attempt in range(tries_per_item):
+                        if attempt and attempt % 10 == 0:
+                            side = side2 if side == side1 else side1
+                        if attempt and attempt % 25 == 0:
+                            tol *= 0.8  
+
+                        x = round(random.uniform(*side), 1)
+                        if is_ok(x, tol):
+                            picked = x
+                            break
+
+                    if picked is None:
+                        candidates = [g for g in grid if g not in existing]
+                        tol = min_gap
+                        while True:
+                            filtered = [g for g in candidates if is_ok(g, tol)]
+                            if filtered:
+                                def score(g):
+                                    min_other_dist = min(abs(g - v) for v in existing) if existing else 1.0
+                                    return (abs(g - conf), min_other_dist)
+                                filtered.sort(key=score, reverse=True)
+                                picked = filtered[0]
+                                break
+                            tol *= 0.8
+                            if tol < 1e-6:
+                                candidates.sort(key=lambda g: abs(g - conf), reverse=True)
+                                picked = candidates[0] if candidates else round(random.uniform(0.0, 1.0), 1)
+                                break
+
+                    out.append(picked)
+                    existing.add(picked)
+
+                return out
+
+            
+            import numpy as np
+            import random 
+
+            new_confs_storage = []
+            for group in groups:
+                confs = []
+                new_confs = []
+                for elem in group:
+                    full_str = self.tokenizer.decode(elem)
+                    conf_raw = _first_block(full_str, 'confidence')
+                    if conf_raw is not None:
+                        confidence = _parse_confidence(conf_raw)
+                        confs.append(confidence)
+                    else:
+                        confs.append(None)
+                
+                for i in range(len(group)):
+                    conf = confs[i]
+                    if conf is not None:
+                        new_confs.append(conf)
+                        existing_now = set(new_confs)
+                        new_vals = _sample_diverse_values(conf, prompts.meta_info['num_duplicated_rollouts'] - 1, existing=existing_now, min_gap=0.1)
+                        new_confs.extend(new_vals)
+                    else:
+                        for i in range(prompts.meta_info['num_duplicated_rollouts']):
+                            new_confs.append(conf)
+
+                assert len(new_confs) == len(group) * prompts.meta_info['num_duplicated_rollouts']
+
+                new_confs_storage.extend(new_confs)
+            
+            for i in range(len(new_responses)):
+                if new_confs_storage[i] is not None:
+                    curr_response = new_responses[i]
+                    # print('INITIAL', self.tokenizer.convert_ids_to_tokens(curr_response))
+                    this_response = self.tokenizer.decode(new_responses[i], skip_special_tokens=False)
+                    open_start = this_response.find('<confidence>')
+                    close_start = this_response.find('</confidence>')
+                    if open_start != -1 and close_start != -1:
+                        open_start = open_start + len('<confidence>')
+                        new_response = self.tokenizer(this_response[:open_start] + str(new_confs_storage[i]) + this_response[close_start:], return_tensors='pt', add_special_tokens=False)['input_ids'][0].tolist()
+                        # print('FINAL', self.tokenizer.convert_ids_to_tokens(new_response))
+                        new_responses[i] = new_response
+                    else:
+                        continue
+                    # tokenizer_ids = self.tokenizer.convert_ids_to_tokens(this_response)
+                    # open_start = _find_subseq(tokenizer_ids, ['<', 'confidence', '>']) + 3
+                    # close_start = _find_subseq(tokenizer_ids, ['</', 'confidence', '>'])
+                    # if open_start == 2 or close_start == -1:
+                    #     continue 
+                    # new_ids = self.tokenizer.convert_tokens_to_ids(tokenizer_ids[:open_start]) # confidence followed by > token; slice up to there 
+                    # back_ids = self.tokenizer.convert_tokens_to_ids(tokenizer_ids[close_start:]) # get end of string, </confidence>
+                    # middle_ids = self.tokenizer(str(new_confs_storage[i]), return_tensors='pt')['input_ids'][0].tolist()
+                    # new_ids.extend(middle_ids)
+                    # new_ids.extend(back_ids)
+
+                    # new_response = self.tokenizer.convert_tokens_to_ids(new_ids)
+                    # new_responses[i] = new_response
+            response = new_responses
+                
+
+                
+
+
+
+                
+
+
+        # response_ids_vary = []
+        # for i in range(len(response)):
+        #     temp = self.tokenizer.convert_ids_to_tokens(response[i])
+        #     full_str = self.tokenizer.decode(response[i])
+        #     print('FULL_STR', full_str)
+        #     if '<confidence>' not in full_str or '</confidence>' not in full_str: 
+        #         response_ids_var.append([])
+        #     else:
+        #         response_ids_vary.append(temp)
+
         response = pad_2d_list_to_length(response, self.pad_token_id,
                                          max_length=self.config.response_length).to(idx.device)
+        
+        if prompts.meta_info['vary_confidence']:
+            num_repeat = self.config.n * prompts.meta_info['num_duplicated_rollouts']
+        else:
+            num_repeat = self.config.n
 
-        if self.config.n > 1 and do_sample:
-            idx = idx.repeat_interleave(self.config.n, dim=0)
-            attention_mask = attention_mask.repeat_interleave(self.config.n, dim=0)
-            position_ids = position_ids.repeat_interleave(self.config.n, dim=0)
-            batch_size = batch_size * self.config.n
+        if num_repeat > 1 and do_sample:
+            idx = idx.repeat_interleave(num_repeat, dim=0)
+            attention_mask = attention_mask.repeat_interleave(num_repeat, dim=0)
+            position_ids = position_ids.repeat_interleave(num_repeat, dim=0)
+            batch_size = batch_size * num_repeat
+
         seq = torch.cat([idx, response], dim=-1)
 
         response_length = response.size(1)
