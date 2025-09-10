@@ -30,3 +30,6 @@ Qwen*/
 *.bin
 __pycache__/
 .ipynb_checkpoints/
+plausibleqa_generations.json
+distill_qwen_1.5bplausibleqa_generations.json
+outputs/
