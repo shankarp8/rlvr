@@ -1,8 +1,8 @@
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
-model_name = "Qwen/Qwen3-0.6B"
+model_name = "Qwen/Qwen2.5-3B-Instruct"
 
-save_dir = "/home/sp2583/rlvr/Qwen3-0.6B"
+save_dir = "Qwen/Qwen2.5-3B-Instruct"
 
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 tokenizer.save_pretrained(save_dir)
