@@ -157,10 +157,10 @@ def compute_score(data_source, solution_str, ground_truth, extra_info=None, hpar
     pa_num = _try_float(pred_answer_raw)
     gt_num = _try_float(ground_truth)
 
-    if pa_num is not None and gt_num is not None: # MCQ
+    if pa_num is not None and gt_num is not None: # plausible
         pred_answer = pa_num
         gt_answer = gt_num
-    else: # free response
+    else: # hotpot/trivia/etc.
         pred_answer = _canonicalize_key(pred_answer_raw)
         gt_answer = _canonicalize_key(str(ground_truth))
 
@@ -201,7 +201,7 @@ def compute_score(data_source, solution_str, ground_truth, extra_info=None, hpar
     # if not predict_distribution:
 
     brier = (q - acc) ** 2
-    base_reward = acc - abs(q - acc)
+    base_reward = acc - brier
 
     if not length_penalty and not parallel_confidence:
         print('NORMAL')
@@ -217,9 +217,9 @@ def compute_score(data_source, solution_str, ground_truth, extra_info=None, hpar
         print('LENGTH PENALTY')
         if length is None:
             length_reward = - 1.0
-        w_acc = 0.4
-        w_base = 0.4
-        w_format = 0.2
+        w_acc = 0.35
+        w_base = 0.35
+        w_format = 0.3
         w_length = 0.0
 
         score =  w_acc * acc + w_base * base_reward + w_format * format_bonus + confidence_pen
