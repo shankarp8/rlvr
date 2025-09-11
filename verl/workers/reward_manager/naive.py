@@ -292,23 +292,23 @@ class NaiveRewardManager:
             score_record.append(record)
             components_record.append(components)
 
-        generations_log_path = '/home/sp2583/rlvr/plausibleqa_generations.json'
-        if generations_to_log:
-            existing = _safe_load_json(generations_log_path)
-            if not isinstance(existing, dict):
-                existing = {}
-            for q, gen_list in generations_to_log.items():
-                if q is None:
-                    continue
-                bucket = existing.setdefault(q, [])
-                bucket.extend(gen_list)
-                seen = set()
-                deduped = []
-                for g in bucket:
-                    if g not in seen:
-                        seen.add(g)
-                        deduped.append(g)
-                existing[q] = deduped
-            _safe_write_json(generations_log_path, existing)
+        # generations_log_path = '/home/sp2583/rlvr/plausibleqa_generations.json'
+        # if generations_to_log:
+        #     existing = _safe_load_json(generations_log_path)
+        #     if not isinstance(existing, dict):
+        #         existing = {}
+        #     for q, gen_list in generations_to_log.items():
+        #         if q is None:
+        #             continue
+        #         bucket = existing.setdefault(q, [])
+        #         bucket.extend(gen_list)
+        #         seen = set()
+        #         deduped = []
+        #         for g in bucket:
+        #             if g not in seen:
+        #                 seen.add(g)
+        #                 deduped.append(g)
+        #         existing[q] = deduped
+        #     _safe_write_json(generations_log_path, existing)
 
         return reward_tensor, score_record, components_record

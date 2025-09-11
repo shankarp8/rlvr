@@ -129,7 +129,7 @@ def apply_kl_penalty(data: DataProto, kl_ctrl: core_algos.AdaptiveKLController, 
     return data, metrics
 
 
-def compute_advantage(data: DataProto, adv_estimator, gamma=1.0, lam=1.0, num_repeat=1):
+def compute_advantage(data: DataProto, adv_estimator, gamma=1.0, lam=1.0, num_repeat=1, std_norm=True):
     # prepare response group
     # TODO: add other ways to estimate advantages
     if adv_estimator == 'gae':
@@ -156,7 +156,7 @@ def compute_advantage(data: DataProto, adv_estimator, gamma=1.0, lam=1.0, num_re
         advantages, returns = core_algos.compute_grpo_outcome_advantage(token_level_rewards=token_level_rewards,
                                                                         eos_mask=response_mask,
                                                                         index=index,
-                                                                        std_norm=config.algorithm.std_norm)
+                                                                        std_norm=std_norm)
         data.batch['advantages'] = advantages
         data.batch['returns'] = returns
     elif adv_estimator == 'reinforce_plus_plus':
@@ -759,34 +759,139 @@ class RayPPOTrainer(object):
 
     #     return metric_dict
     def _validate(self):
+        def _auroc_from_scores_labels(scores, labels):
+            import numpy as np
+            s = np.asarray(scores, dtype=np.float64)
+            y = np.asarray(labels, dtype=np.int32)
+            n_pos = int(y.sum())
+            n_neg = len(y) - n_pos
+            if n_pos == 0 or n_neg == 0:
+                return float('nan') 
+
+            order = np.argsort(-s, kind='mergesort')
+            s_sorted = s[order]
+            y_sorted = y[order]
+
+            au_u = 0.0
+            neg_before = 0
+            i = 0
+            N = len(s_sorted)
+            while i < N:
+                j = i + 1
+                while j < N and s_sorted[j] == s_sorted[i]:
+                    j += 1
+                grp = y_sorted[i:j]
+                p = int(grp.sum())
+                n = (j - i) - p
+
+                au_u += p * neg_before + 0.5 * p * n
+                neg_before += n
+                i = j
+
+            auc = au_u / (n_pos * n_neg)
+            return float(auc)
+
+        def _ece(scores, labels, num_bins=10):
+            import numpy as np
+            s = np.asarray(scores, dtype=np.float64)
+            y = np.asarray(labels, dtype=np.float64)
+            if len(s) == 0:
+                return float('nan')
+
+            s = np.clip(s, 0.0, 1.0)
+
+            bins = np.linspace(0.0, 1.0, num_bins + 1)
+            bin_idx = np.minimum(np.digitize(s, bins[:-1], right=False), num_bins) - 1
+
+            ece = 0.0
+            N = len(s)
+            for b in range(num_bins):
+                mask = (bin_idx == b)
+                cnt = int(mask.sum())
+                if cnt == 0:
+                    continue
+                conf = float(s[mask].mean())
+                acc = float(y[mask].mean())
+                ece += (cnt / N) * abs(acc - conf)
+            return float(ece)
+            
+        def _avg_in_bins(values, bins, refs):
+            import numpy as np
+            v = np.asarray(values, dtype=np.float64)
+            r = np.asarray(refs, dtype=np.float64)
+            out = []
+            for i, (lo, hi) in enumerate(bins):
+                if i < len(bins) - 1:
+                    mask = (r >= lo) & (r <  hi)
+                else:
+                    mask = (r >= lo) & (r <= hi)
+                cnt = int(mask.sum())
+                mean = float(v[mask].mean()) if cnt > 0 else float('nan')
+                out.append((mean, cnt))
+            return out
+
         def summarize_component_records(component_records, prefix="reward_components"):
-                if not component_records:
-                    return {}
+            if not component_records:
+                return {}
 
-                keys = set()
-                for d in component_records:
-                    keys.update(k for k in d.keys() if isinstance(d.get(k), (int, float)))
+            keys = set()
+            for d in component_records:
+                keys.update(k for k in d.keys() if isinstance(d.get(k), (int, float)))
 
-                import numpy as np
-                arrays = {k: [] for k in keys}
-                for d in component_records:
-                    for k in keys:
-                        v = d.get(k, None)
-                        if isinstance(v, (int, float)):
-                            arrays[k].append(float(v))
+            import numpy as np
+            arrays = {k: [] for k in keys}
+            for d in component_records:
+                for k in keys:
+                    v = d.get(k, None)
+                    if isinstance(v, (int, float)):
+                        arrays[k].append(float(v))
 
-                out = {}
-                for k, vals in arrays.items():
-                    if not vals:
-                        continue
-                    a = np.array(vals, dtype=np.float32)
-                    out[f"{prefix}/{k}/mean"] = float(a.mean())
-                    if k in ['verbalized_confidence', 'acc'] or 'brier' in k or 'verbalized' in k:
-                        out[f"{prefix}/{k}/min"]  = float(a.min())
-                        out[f"{prefix}/{k}/max"]  = float(a.max())
-                        out[f"{prefix}/{k}/std"]  = float(a.std())
-                        # out[f"{prefix}/{k}/length"]  = float(len(a))
-                return out
+            out = {}
+            for k, vals in arrays.items():
+                if not vals:
+                    continue
+                a = np.array(vals, dtype=np.float32)
+                out[f"{prefix}/{k}/mean"] = float(a.mean())
+                if k in ['verbalized_confidence', 'acc'] or 'brier' in k or 'verbalized' in k or 'consistency' in k:
+                    out[f"{prefix}/{k}/min"]  = float(a.min())
+                    out[f"{prefix}/{k}/max"]  = float(a.max())
+                    out[f"{prefix}/{k}/std"]  = float(a.std())
+
+            conf_key = 'verbalized confidence'   
+            has_acc  = 'acc' in arrays              
+            has_cons = 'consistency' in arrays      
+
+            if conf_key is not None:
+                q = arrays[conf_key]
+
+                if has_acc and len(arrays['acc']) == len(q):
+                    ece_q_acc = _ece(q, arrays['acc'], num_bins=10)
+                    out[f"{prefix}/ece10_q_vs_acc"] = float(ece_q_acc)
+
+                if has_cons and len(arrays['consistency']) == len(q):
+                    ece_q_cons = _ece(q, arrays['consistency'], num_bins=10)
+                    out[f"{prefix}/ece10_q_vs_consistency"] = float(ece_q_cons)
+
+                if has_cons and len(arrays['consistency']) == len(q):
+                    quartile_bins = [(0.0, 0.25), (0.25, 0.5), (0.5, 0.75), (0.75, 1.0)]
+                    means_counts = _avg_in_bins(q, quartile_bins, arrays['consistency'])
+                    labels = ["0_0.25", "0.25_0.5", "0.5_0.75", "0.75_1.0"]
+                    for lab, (mean_q, cnt) in zip(labels, means_counts):
+                        out[f"{prefix}/avg_q_given_consistency_{lab}"] = float(mean_q)
+                        out[f"{prefix}/count_given_consistency_{lab}"] = float(cnt)
+
+                if has_acc and len(arrays['acc']) == len(q):
+                    acc_arr = np.array(arrays['acc'], dtype=np.float64)
+                    q_arr   = np.array(q, dtype=np.float64)
+
+                    for val in (0.0, 1.0):
+                        mask = (acc_arr == val)
+                        cnt  = int(mask.sum())
+                        mean_q = float(q_arr[mask].mean()) if cnt > 0 else float('nan')
+                        out[f"{prefix}/avg_q_given_acc_{int(val)}"] = mean_q
+                        out[f"{prefix}/count_given_acc_{int(val)}"] = float(cnt)
+
+            return out
         reward_tensor_lst = []
         data_source_lst = []
         component_records_all = []  
@@ -1278,39 +1383,140 @@ class RayPPOTrainer(object):
                         metrics.update({
                             "vary_confidence": vary_confidence,
                         })
+
+                        def _auroc_from_scores_labels(scores, labels):
+                            import numpy as np
+                            s = np.asarray(scores, dtype=np.float64)
+                            y = np.asarray(labels, dtype=np.int32)
+                            n_pos = int(y.sum())
+                            n_neg = len(y) - n_pos
+                            if n_pos == 0 or n_neg == 0:
+                                return float('nan') 
+
+                            order = np.argsort(-s, kind='mergesort')
+                            s_sorted = s[order]
+                            y_sorted = y[order]
+
+                            au_u = 0.0
+                            neg_before = 0
+                            i = 0
+                            N = len(s_sorted)
+                            while i < N:
+                                j = i + 1
+                                while j < N and s_sorted[j] == s_sorted[i]:
+                                    j += 1
+                                grp = y_sorted[i:j]
+                                p = int(grp.sum())
+                                n = (j - i) - p
+
+                                au_u += p * neg_before + 0.5 * p * n
+                                neg_before += n
+                                i = j
+
+                            auc = au_u / (n_pos * n_neg)
+                            return float(auc)
+
+                        def _ece(scores, labels, num_bins=10):
+                            import numpy as np
+                            s = np.asarray(scores, dtype=np.float64)
+                            y = np.asarray(labels, dtype=np.float64)
+                            if len(s) == 0:
+                                return float('nan')
+
+                            s = np.clip(s, 0.0, 1.0)
+
+                            bins = np.linspace(0.0, 1.0, num_bins + 1)
+                            bin_idx = np.minimum(np.digitize(s, bins[:-1], right=False), num_bins) - 1
+
+                            ece = 0.0
+                            N = len(s)
+                            for b in range(num_bins):
+                                mask = (bin_idx == b)
+                                cnt = int(mask.sum())
+                                if cnt == 0:
+                                    continue
+                                conf = float(s[mask].mean())
+                                acc = float(y[mask].mean())
+                                ece += (cnt / N) * abs(acc - conf)
+                            return float(ece)
+
+                        def _avg_in_bins(values, bins, refs):
+                            import numpy as np
+                            v = np.asarray(values, dtype=np.float64)
+                            r = np.asarray(refs, dtype=np.float64)
+                            out = []
+                            for i, (lo, hi) in enumerate(bins):
+                                if i < len(bins) - 1:
+                                    mask = (r >= lo) & (r <  hi)
+                                else:
+                                    mask = (r >= lo) & (r <= hi)
+                                cnt = int(mask.sum())
+                                mean = float(v[mask].mean()) if cnt > 0 else float('nan')
+                                out.append((mean, cnt))
+                            return out
+
                         def summarize_component_records(component_records, prefix="reward_components"):
-                                if not component_records:
-                                    return {}
+                            if not component_records:
+                                return {}
 
-                                keys = set()
-                                for d in component_records:
-                                    keys.update(k for k in d.keys() if isinstance(d.get(k), (int, float)))
+                            keys = set()
+                            for d in component_records:
+                                keys.update(k for k in d.keys() if isinstance(d.get(k), (int, float)))
 
-                                import numpy as np
-                                arrays = {k: [] for k in keys}
-                                for d in component_records:
-                                    for k in keys:
-                                        v = d.get(k, None)
-                                        if isinstance(v, (int, float)):
-                                            arrays[k].append(float(v))
+                            import numpy as np
+                            arrays = {k: [] for k in keys}
+                            for d in component_records:
+                                for k in keys:
+                                    v = d.get(k, None)
+                                    if isinstance(v, (int, float)):
+                                        arrays[k].append(float(v))
 
-                                out = {}
-                                for k, vals in arrays.items():
-                                    if not vals:
-                                        continue
-                                    a = np.array(vals, dtype=np.float32)
-                                    out[f"{prefix}/{k}/mean"] = float(a.mean())
-                                    if k in ['verbalized_confidence', 'acc'] or 'brier' in k or 'verbalized' in k:
-                                        out[f"{prefix}/{k}/min"]  = float(a.min())
-                                        out[f"{prefix}/{k}/max"]  = float(a.max())
-                                        out[f"{prefix}/{k}/std"]  = float(a.std())
-                                        import scipy
-                                        if 'verbalized' in k:
-                                            out[f"{prefix}/{k}/IQR"]  = float(np.percentile(a, 75) - np.percentile(a, 25))
-                                            out[f"{prefix}/{k}/skew"] = float(scipy.stats.skew(a))
-                                            out[f"{prefix}/{k}/kurtosis"] = float(scipy.stats.kurtosis(a))
-                                        # out[f"{prefix}/{k}/length"]  = float(len(a))
-                                return out
+                            out = {}
+                            for k, vals in arrays.items():
+                                if not vals:
+                                    continue
+                                a = np.array(vals, dtype=np.float32)
+                                out[f"{prefix}/{k}/mean"] = float(a.mean())
+                                if k in ['verbalized_confidence', 'acc'] or 'brier' in k or 'verbalized' in k or 'consistency' in k:
+                                    out[f"{prefix}/{k}/min"]  = float(a.min())
+                                    out[f"{prefix}/{k}/max"]  = float(a.max())
+                                    out[f"{prefix}/{k}/std"]  = float(a.std())
+
+                            conf_key = 'verbalized confidence'   
+                            has_acc  = 'acc' in arrays              
+                            has_cons = 'consistency' in arrays      
+
+                            if conf_key is not None:
+                                q = arrays[conf_key]
+
+                                if has_acc and len(arrays['acc']) == len(q):
+                                    ece_q_acc = _ece(q, arrays['acc'], num_bins=10)
+                                    out[f"{prefix}/ece10_q_vs_acc"] = float(ece_q_acc)
+
+                                if has_cons and len(arrays['consistency']) == len(q):
+                                    ece_q_cons = _ece(q, arrays['consistency'], num_bins=10)
+                                    out[f"{prefix}/ece10_q_vs_consistency"] = float(ece_q_cons)
+
+                                if has_cons and len(arrays['consistency']) == len(q):
+                                    quartile_bins = [(0.0, 0.25), (0.25, 0.5), (0.5, 0.75), (0.75, 1.0)]
+                                    means_counts = _avg_in_bins(q, quartile_bins, arrays['consistency'])
+                                    labels = ["0_0.25", "0.25_0.5", "0.5_0.75", "0.75_1.0"]
+                                    for lab, (mean_q, cnt) in zip(labels, means_counts):
+                                        out[f"{prefix}/avg_q_given_consistency_{lab}"] = float(mean_q)
+                                        out[f"{prefix}/count_given_consistency_{lab}"] = float(cnt)
+
+                                if has_acc and len(arrays['acc']) == len(q):
+                                    acc_arr = np.array(arrays['acc'], dtype=np.float64)
+                                    q_arr   = np.array(q, dtype=np.float64)
+
+                                    for val in (0.0, 1.0):
+                                        mask = (acc_arr == val)
+                                        cnt  = int(mask.sum())
+                                        mean_q = float(q_arr[mask].mean()) if cnt > 0 else float('nan')
+                                        out[f"{prefix}/avg_q_given_acc_{int(val)}"] = mean_q
+                                        out[f"{prefix}/count_given_acc_{int(val)}"] = float(cnt)
+
+                            return out
 
                         comp_metrics = summarize_component_records(component_records, prefix="reward_components")
                         metrics.update(comp_metrics)
@@ -1329,7 +1535,8 @@ class RayPPOTrainer(object):
                                                   adv_estimator=self.config.algorithm.adv_estimator,
                                                   gamma=self.config.algorithm.gamma,
                                                   lam=self.config.algorithm.lam,
-                                                  num_repeat=self.config.actor_rollout_ref.rollout.n)
+                                                  num_repeat=self.config.actor_rollout_ref.rollout.n,
+                                                  std_norm=self.config.algorithm.std_norm)
 
                     # update critic
                     if self.use_critic:

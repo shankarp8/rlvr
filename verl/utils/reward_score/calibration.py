@@ -87,12 +87,18 @@ def _distill_segment(s: str) -> str:
         return seg
     return s  
 
-with open("/home/sp2583/rlvr3/triviaqa_alias_map.json") as f:
-    TRIVIAQA_ALIAS_MAP = json.load(f)
+# try:
+#     with open("/home/sp2583/rlvr3/triviaqa_alias_map.json") as f:
+#         TRIVIAQA_ALIAS_MAP = json.load(f)
+# except:
+#     TRIVIAQA_ALIAS_MAP = None
 
 def _canonicalize_key(k: str) -> str:
     s = _normalize_text(k)
-    return TRIVIAQA_ALIAS_MAP.get(s, s)
+    return s
+    # if TRIVIAQA_ALIAS_MAP:
+    #     return TRIVIAQA_ALIAS_MAP.get(s, s)
+    # return 
 
 
 def compute_score(data_source, solution_str, ground_truth, extra_info=None, hparams=None):
@@ -226,14 +232,14 @@ def compute_score(data_source, solution_str, ground_truth, extra_info=None, hpar
         score = max(-1.0, min(1.0, score))
     
     else:
-        w_acc = 0.35
-        w_base = 0.35
-        w_format = 0.3
+        w_acc = 0.0
+        w_base = 1.0
+        w_format = 1.0
         answer_record = extra_info['answer_record']
         num_sampled = answer_record.get(pred_answer, 0)
         consistency = num_sampled / sum(list(answer_record.values()))
         print('CONSISTENCY', consistency)
-        base_reward = 1 - abs(q - consistency) ** 1.0
+        base_reward = - (q - consistency) ** 2
         print('CONSISTENCY REWARD', base_reward)
 
         score =  w_acc * acc + w_base * base_reward + w_format * format_bonus + confidence_pen
@@ -249,6 +255,7 @@ def compute_score(data_source, solution_str, ground_truth, extra_info=None, hpar
 
     # score = 0.7 * base_reward + 0.3 * format_bonus + confidence_pen
     # score = max(-1.0, min(1.0, score))
+    
     print('SCORE', score)
 
     components = {

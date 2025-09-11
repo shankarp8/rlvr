@@ -20,15 +20,15 @@ EVAL_STEPS=5
 
 LR=1e-6
 
-EXPERIMENT_NAME="qwen3_trylongbasic_1e-6_balanced_start200_sharper_reward"
+EXPERIMENT_NAME="qwen3_basic_no_stdnorm_1e-6_start200_new_reward_formulation"
 PROJECT_NAME='confidence_after_answer_plausible'
 
 
 python3 -m verl.trainer.main_ppo \
  algorithm.adv_estimator=grpo \
- algorithm.std_norm=True \
- data.train_files=$HOME/rlvr/rlcr_pqa_clast_kinda_balanced_train2.parquet \
- data.val_files=$HOME/rlvr/rlcr_pqa_clast_kinda_balanced_validation2.parquet \
+ +algorithm.std_norm=False \
+ data.train_files=$HOME/rlvr/rlcr_pqa_train.parquet \
+ data.val_files=$HOME/rlvr/rlcr_pqa_validation.parquet \
  data.train_batch_size=32 \
  data.val_batch_size=256 \
  data.max_prompt_length=3072 \
@@ -69,7 +69,7 @@ python3 -m verl.trainer.main_ppo \
  trainer.test_freq=$EVAL_STEPS \
  trainer.total_epochs=$TOTAL_EPOCHS \
  +trainer.vary_confidence=False \
- +trainer.parallel_confidence=False \
+ +trainer.parallel_confidence=True \
  +trainer.num_duplicated_rollouts=1
 
 #  data.train_files=$HOME/rlvr/rlcr_pqa_cfirst_kinda_balanced_train2.parquet \

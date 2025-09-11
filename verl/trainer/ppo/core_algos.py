@@ -111,7 +111,7 @@ def compute_gae_advantage_return(token_level_rewards: torch.Tensor, values: torc
 def compute_grpo_outcome_advantage(token_level_rewards: torch.Tensor,
                                    eos_mask: torch.Tensor,
                                    index: torch.Tensor,
-                                   std_norm: bool = True
+                                   std_norm: bool = True,
                                    epsilon: float = 1e-6):
     """
     Compute advantage for GRPO, operating only on Outcome reward 
