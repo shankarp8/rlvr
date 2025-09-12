@@ -239,9 +239,9 @@ def compute_score(data_source, solution_str, ground_truth, extra_info=None, hpar
         num_sampled = answer_record.get(pred_answer, 0)
         consistency = num_sampled / sum(list(answer_record.values()))
         import math
-        w_base = 1 / (consistency ** 0.25)
+        # w_base = 1 / (consistency ** 0.25)
         print('CONSISTENCY', consistency)
-        base_reward = - (q - consistency) ** 2
+        base_reward = - (q - consistency) ** 2 - (q - acc) ** 2
         print('CONSISTENCY REWARD', base_reward)
 
         score =  w_acc * acc + w_base * base_reward + w_format * format_bonus + confidence_pen
