@@ -7,8 +7,8 @@ export VLLM_ATTENTION_BACKEND=XFORMERS
 export CHECKPOINTS_DIR="./outputs"
 # export BASE_MODEL="/home/sp2583/rlvr/Qwen3-4B-Thinking"
 # export BASE_MODEL='/home/sp2583/rlvr/distill_qwen_1.5b'
-# export BASE_MODEL='/home/sp2583/rlvr/Qwen2.5-3B-Instruct'
-export BASE_MODEL='/home/sp2583/rlvr/outputs/confidence_after_answer_plausible/qwen3_trylongbasic_1e-6/global_step_200/actor'
+export BASE_MODEL='/home/sp2583/rlvr/Qwen2.5-3B-Instruct'
+# export BASE_MODEL='/home/sp2583/rlvr/outputs/confidence_after_answer_plausible/qwen3_trylongbasic_1e-6/global_step_200/actor'
 
 N_GPUS=2
 ROLLOUT_N=16
@@ -20,7 +20,7 @@ EVAL_STEPS=5
 
 LR=1e-6
 
-EXPERIMENT_NAME="qwen3_basic_no_stdnorm_1e-6_start200_new_reward_formulation"
+EXPERIMENT_NAME="qwen3_basic_no_stdnorm_1e-6_combined_reward"
 PROJECT_NAME='confidence_after_answer_plausible'
 
 
