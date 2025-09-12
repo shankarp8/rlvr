@@ -23,7 +23,7 @@ PROJECT_NAME='confidence_after_answer_hotpot'
 
 python3 -m verl.trainer.main_ppo \
  algorithm.adv_estimator=grpo \
- algorithm.std_norm=True \
+ +algorithm.std_norm=True \
  data.train_files=$HOME/rlvr/hotpot_noc_train_50.parquet \
  data.val_files=$HOME/rlvr/hotpot_noc_validation_50.parquet \
  data.train_batch_size=32 \
