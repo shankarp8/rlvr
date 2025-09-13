@@ -26,6 +26,8 @@ from verl import DataProto
 from verl.utils.torch_functional import (broadcast_dict_tensor, allgather_dict_tensors)
 from verl.utils.debug import log_gpu_memory_usage
 from verl.third_party.vllm import vllm_version
+import torch.nn as nn
+from vllm.model_executor.model_loader.utils import set_default_torch_dtype
 
 from .base import BaseShardingManager
 
