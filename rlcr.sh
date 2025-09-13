@@ -68,6 +68,6 @@ python3 -m verl.trainer.main_ppo \
  trainer.test_freq=$EVAL_STEPS \
  trainer.total_epochs=$TOTAL_EPOCHS \
  +trainer.vary_confidence=False \
- +trainer.parallel_confidence=True \
+ +trainer.parallel_confidence=False \
  +trainer.num_duplicated_rollouts=1
 
