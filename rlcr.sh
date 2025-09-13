@@ -17,9 +17,9 @@ TOTAL_EPOCHS=1
 SAVE_STEPS=50
 EVAL_STEPS=5
 
-LR=1e-6
+LR=3e-6
 
-EXPERIMENT_NAME="qwen3_superhigh_temp"
+EXPERIMENT_NAME="qwen3_3e-6"
 PROJECT_NAME='confidence_after_answer_plausible'
 
 
@@ -48,7 +48,7 @@ python3 -m verl.trainer.main_ppo \
  actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
  actor_rollout_ref.rollout.tensor_model_parallel_size=$TENSOR_MODEL_PARALLEL_SIZE \
  actor_rollout_ref.rollout.name=vllm \
- actor_rollout_ref.rollout.temperature=1.8 \
+ actor_rollout_ref.rollout.temperature=1.0 \
  +actor_rollout_ref.rollout.val_temperature=0.5 \
  actor_rollout_ref.rollout.max_num_batched_tokens=16384 \
  actor_rollout_ref.rollout.gpu_memory_utilization=0.6 \
