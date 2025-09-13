@@ -117,12 +117,13 @@ class NaiveRewardManager:
                 return seg
             return s  
 
-        with open("/home/sp2583/rlvr3/triviaqa_alias_map.json") as f:
-            TRIVIAQA_ALIAS_MAP = json.load(f)
+        # with open("/home/sp2583/rlvr3/triviaqa_alias_map.json") as f:
+        #     TRIVIAQA_ALIAS_MAP = json.load(f)
 
         def _canonicalize_key(k: str) -> str:
             s = _normalize_text(k)
-            return TRIVIAQA_ALIAS_MAP.get(s, s)
+            return s
+            # return TRIVIAQA_ALIAS_MAP.get(s, s)
 
         def _safe_load_json(path: str):
             try:
