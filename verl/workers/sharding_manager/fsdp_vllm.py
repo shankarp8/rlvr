@@ -99,7 +99,7 @@ class FSDPVLLMShardingManager(BaseShardingManager):
                         # FIXME: Remove this after Mixtral is updated
                         # to use quant_method.
                         if hasattr(module, "process_weights_after_loading"):
-                            module.process_weights_after_loading()
+                            module.process_weights_after_loading(act_dtype=next(vllm_model.parameters()).dtype)
                     vllm_model = vllm_model.cuda()
                 load_hf_weights(params, self.inference_engine.llm_engine.model_executor.driver_worker.worker.model_runner.model)
         log_gpu_memory_usage('After sync model weights in sharding manager', logger=logger)
