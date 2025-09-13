@@ -1,7 +1,7 @@
 set -x
 
 
-export CUDA_VISIBLE_DEVICES=0,1
+export CUDA_VISIBLE_DEVICES=0
 export VLLM_ATTENTION_BACKEND=XFORMERS
 export CHECKPOINTS_DIR="./outputs"
 # export BASE_MODEL="/home/sp2583/rlvr/Qwen3-4B-Thinking"
@@ -9,7 +9,7 @@ export CHECKPOINTS_DIR="./outputs"
 export BASE_MODEL='/home/sp2583/rlvr/Qwen2.5-3B-Instruct'
 # export BASE_MODEL='/home/sp2583/rlvr/outputs/confidence_after_answer_plausible/qwen3_trylongbasic_1e-6/global_step_200/actor'
 
-N_GPUS=2
+N_GPUS=1
 ROLLOUT_N=16
 MAX_LENGTH=2048
 TENSOR_MODEL_PARALLEL_SIZE=1
