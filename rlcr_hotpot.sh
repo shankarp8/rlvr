@@ -8,24 +8,24 @@ export CHECKPOINTS_DIR="./outputs"
 export BASE_MODEL='/home/sp2583/rlvr/Qwen2.5-3B-Instruct'
 
 N_GPUS=1
-ROLLOUT_N=16
+ROLLOUT_N=10
 MAX_LENGTH=2048
 TENSOR_MODEL_PARALLEL_SIZE=1
 TOTAL_EPOCHS=1
 SAVE_STEPS=50
-EVAL_STEPS=5
+EVAL_STEPS=1000 # no need to waste time evaluating since train ~ val here 
 
-LR=1e-6
+LR=2e-6
 
-EXPERIMENT_NAME="no_confidence_baseline"
-PROJECT_NAME='confidence_after_answer_hotpot'
+EXPERIMENT_NAME="qwen2.5_2e-6"
+PROJECT_NAME='confidence_after_answer_plausible'
 
 
 python3 -m verl.trainer.main_ppo \
  algorithm.adv_estimator=grpo \
  +algorithm.std_norm=True \
- data.train_files=$HOME/rlvr/hotpot_noc_train_50.parquet \
- data.val_files=$HOME/rlvr/hotpot_noc_validation_50.parquet \
+ data.train_files=$HOME/rlvr/rlcr_pqa_train.parquet \
+ data.val_files=$HOME/rlvr/rlcr_pqa_validation.parquet \
  data.train_batch_size=32 \
  data.val_batch_size=256 \
  data.max_prompt_length=3072 \
@@ -66,5 +66,5 @@ python3 -m verl.trainer.main_ppo \
  trainer.test_freq=$EVAL_STEPS \
  trainer.total_epochs=$TOTAL_EPOCHS \
  +trainer.vary_confidence=False \
- +trainer.parallel_confidence=False \
+ +trainer.parallel_confidence=True \
  +trainer.num_duplicated_rollouts=1
