@@ -241,7 +241,7 @@ def compute_score(data_source, solution_str, ground_truth, extra_info=None, hpar
         import math
         # w_base = 1 / (consistency ** 0.25)
         print('CONSISTENCY', consistency)
-        base_reward = - (q - consistency) ** 2 - (q - acc) ** 2
+        base_reward = - (consistency * math.log(q) + (1 - consistency) * math.log(1 - q))
         print('CONSISTENCY REWARD', base_reward)
 
         score =  w_acc * acc + w_base * base_reward + w_format * format_bonus + confidence_pen
