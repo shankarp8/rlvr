@@ -1,7 +1,7 @@
 set -x
 
 
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=0,1
 export VLLM_ATTENTION_BACKEND=XFORMERS
 export CHECKPOINTS_DIR="./outputs"
 # export BASE_MODEL="/home/sp2583/rlvr/Qwen3-4B-Thinking"
@@ -9,7 +9,7 @@ export CHECKPOINTS_DIR="./outputs"
 export BASE_MODEL='/home/sp2583/rlvr/Qwen2.5-3B-Instruct'
 # export BASE_MODEL='/home/sp2583/rlvr/outputs/confidence_after_answer_plausible/qwen3_trylongbasic_1e-6/global_step_200/actor'
 
-N_GPUS=1
+N_GPUS=2
 ROLLOUT_N=10
 MAX_LENGTH=2048
 TENSOR_MODEL_PARALLEL_SIZE=1
@@ -17,9 +17,9 @@ TOTAL_EPOCHS=1
 SAVE_STEPS=50
 EVAL_STEPS=5
 
-LR=3e-6
+LR=2e-6
 
-EXPERIMENT_NAME="qwen3_3e-6"
+EXPERIMENT_NAME="qwen3_2e-6"
 PROJECT_NAME='confidence_after_answer_plausible'
 
 
