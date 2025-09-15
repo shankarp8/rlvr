@@ -189,9 +189,11 @@ def compute_score(data_source, solution_str, ground_truth, extra_info=None, hpar
             return 0.0, True
         q = float(m.group(0))
         add_confidence_penalty = False
-        if not (q <= 1.0):  
+        if not (q == 1.0) or not (q == 0.0): # for 0 or 1 trials, otherwise remove  
             add_confidence_penalty = True
-            q = q / 100.0
+        if not (q <= 1.0):
+            add_confidence_penalty = True
+            q = q / 100.0 # might be a percent 
         if math.isnan(q) or math.isinf(q):
             return 0.0, True
         return max(0.0, min(1.0, q)), add_confidence_penalty
@@ -199,7 +201,8 @@ def compute_score(data_source, solution_str, ground_truth, extra_info=None, hpar
     q, add_confidence_penalty = _parse_confidence(conf_raw)
     confidence_pen = 0.0
     if add_confidence_penalty:
-        confidence_pen = - 0.2
+        confidence_pen = - 0.8
+        
     print('CONFIDENCE', q)
     print('FORMAT BONUS', format_bonus)
     acc = 1.0 if is_correct else 0.0
