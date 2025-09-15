@@ -1,19 +1,20 @@
 # requirements.txt records the full set of dependencies for development
+torch --index-url https://download.pytorch.org/whl/cu121
+vllm==0.7.3
 accelerate
-codetiming
+transformers
+peft
+tensordict<0.6
 datasets
-dill
-flash-attn
-hydra-core
-liger-kernel
 numpy
 pandas
-peft
 pyarrow>=15.0.0
+hydra-core
+wandb
+ray
+codetiming
+dill
 pybind11
 pylatexenc
-ray
-tensordict<0.6
-transformers
-vllm==0.6.3.post1
-wandb
+liger-kernel
+matplotlib
