@@ -233,17 +233,17 @@ def compute_score(data_source, solution_str, ground_truth, extra_info=None, hpar
     
     else:
         w_acc = 0.0
-        w_base = 1.0
-        w_format = 1.0
+        w_base = 0.2
+        w_format = 0.2
         answer_record = extra_info['answer_record']
         num_sampled = answer_record.get(pred_answer, 0)
         consistency = num_sampled / sum(list(answer_record.values()))
         import math
         # w_base = 1 / (consistency ** 0.25)
         print('CONSISTENCY', consistency)
-        eps = 1e-12
+        eps = 1e-3
         q_clip = min(max(q, eps), 1 - eps)
-        base_reward = - (consistency * math.log(q_clip) + (1 - consistency) * math.log(1 - q_clip))
+        base_reward = consistency * math.log(q_clip) + (1 - consistency) * math.log(1 - q_clip)
         print('CONSISTENCY REWARD', base_reward)
 
         score =  w_acc * acc + w_base * base_reward + w_format * format_bonus + confidence_pen
