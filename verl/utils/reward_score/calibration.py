@@ -243,7 +243,7 @@ def compute_score(data_source, solution_str, ground_truth, extra_info=None, hpar
         print('CONSISTENCY', consistency)
         eps = 1e-12
         q_clip = min(max(q, eps), 1 - eps)
-        loss = - (consistency * math.log(q_clip) + (1 - consistency) * math.log(1 - q_clip))
+        base_reward = - (consistency * math.log(q_clip) + (1 - consistency) * math.log(1 - q_clip))
         print('CONSISTENCY REWARD', base_reward)
 
         score =  w_acc * acc + w_base * base_reward + w_format * format_bonus + confidence_pen
