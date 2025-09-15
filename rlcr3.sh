@@ -26,7 +26,7 @@ PROJECT_NAME='confidence_after_answer_plausible'
 
 python3 -m verl.trainer.main_ppo \
  algorithm.adv_estimator=grpo \
- +algorithm.std_norm=False \
+ +algorithm.std_norm=True \
  data.train_files=$HOME/rlvr/rlcr_pqa_train.parquet \
  data.val_files=$HOME/rlvr/rlcr_pqa_validation.parquet \
  data.train_batch_size=32 \
