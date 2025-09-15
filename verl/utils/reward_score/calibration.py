@@ -189,7 +189,7 @@ def compute_score(data_source, solution_str, ground_truth, extra_info=None, hpar
             return 0.0, True
         q = float(m.group(0))
         add_confidence_penalty = False
-        if not (q == 1.0) or not (q == 0.0): # for 0 or 1 trials, otherwise remove  
+        if not (q == 1.0) and not (q == 0.0): # for 0 or 1 trials, otherwise remove  
             add_confidence_penalty = True
         if not (q <= 1.0):
             add_confidence_penalty = True
