@@ -10,24 +10,24 @@ export BASE_MODEL='/home/sp2583/rlvr/Qwen2.5-3B-Instruct'
 # export BASE_MODEL='/home/sp2583/rlvr/outputs/confidence_after_answer_plausible/qwen3_trylongbasic_1e-6/global_step_200/actor'
 
 N_GPUS=2
-ROLLOUT_N=10
+ROLLOUT_N=16
 MAX_LENGTH=2048
 TENSOR_MODEL_PARALLEL_SIZE=1
 TOTAL_EPOCHS=1
 SAVE_STEPS=50
 EVAL_STEPS=5
 
-LR=2e-6
+LR=3e-6
 
-EXPERIMENT_NAME="qwen3_2e-6"
+EXPERIMENT_NAME="qwen3_3e-6_0_or_1"
 PROJECT_NAME='confidence_after_answer_plausible'
 
 
 python3 -m verl.trainer.main_ppo \
  algorithm.adv_estimator=grpo \
- +algorithm.std_norm=False \
- data.train_files=$HOME/rlvr/rlcr_pqa_train.parquet \
- data.val_files=$HOME/rlvr/rlcr_pqa_validation.parquet \
+ +algorithm.std_norm=True \
+ data.train_files=$HOME/rlvr/rlcr_pqa_0or1_train.parquet \
+ data.val_files=$HOME/rlvr/rlcr_pqa_0or1_validation.parquet \
  data.train_batch_size=32 \
  data.val_batch_size=256 \
  data.max_prompt_length=3072 \
@@ -68,6 +68,6 @@ python3 -m verl.trainer.main_ppo \
  trainer.test_freq=$EVAL_STEPS \
  trainer.total_epochs=$TOTAL_EPOCHS \
  +trainer.vary_confidence=False \
- +trainer.parallel_confidence=True \
+ +trainer.parallel_confidence=False \
  +trainer.num_duplicated_rollouts=1
 
