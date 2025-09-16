@@ -108,6 +108,8 @@ def compute_score(data_source, solution_str, ground_truth, extra_info=None, hpar
         solution_str = _assistant_segment(solution_str)
     elif '<｜Assistant｜>' in solution_str:
         solution_str = _distill_segment(solution_str)
+    else: # for models whose chat template I've not considered
+        solution_str = solution_str[solution_str.index('Question:'):]
     
     length_penalty = False
     if 'length_penalty' in list(extra_info.keys()):
