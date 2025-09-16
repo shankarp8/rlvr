@@ -7,7 +7,7 @@ export VLLM_ATTENTION_BACKEND=XFORMERS
 export CHECKPOINTS_DIR="./outputs"
 # export BASE_MODEL="/home/sp2583/rlvr/Qwen3-4B-Thinking"
 # export BASE_MODEL='/home/sp2583/rlvr/distill_qwen_1.5b'
-export BASE_MODEL='/home/sp2583/rlvr/Qwen2.5-3B-Instruct'
+export BASE_MODEL='/home/sp2583/rlvr/Qwen2.5-3B'
 # export BASE_MODEL='/home/sp2583/rlvr/outputs/confidence_after_answer_plausible/qwen3_trylongbasic_1e-6/global_step_200/actor'
 
 N_GPUS=2
