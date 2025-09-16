@@ -11,16 +11,16 @@ export BASE_MODEL='/home/sp2583/rlvr/Qwen2.5-3B'
 # export BASE_MODEL='/home/sp2583/rlvr/outputs/confidence_after_answer_plausible/qwen3_trylongbasic_1e-6/global_step_200/actor'
 
 N_GPUS=2
-ROLLOUT_N=16
+ROLLOUT_N=24
 MAX_LENGTH=2048
 TENSOR_MODEL_PARALLEL_SIZE=1
 TOTAL_EPOCHS=1
 SAVE_STEPS=50
 EVAL_STEPS=5
 
-LR=2e-6
+LR=1e-6
 
-EXPERIMENT_NAME="qwen3_0or1_2e-6"
+EXPERIMENT_NAME="qwen3_0or1_1e-6"
 PROJECT_NAME='confidence_after_answer_plausible'
 
 
