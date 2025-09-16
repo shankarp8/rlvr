@@ -6,7 +6,7 @@ export VLLM_ATTENTION_BACKEND=XFORMERS
 export CHECKPOINTS_DIR="./outputs"
 # export BASE_MODEL="/home/sp2583/rlvr/Qwen3-4B-Thinking"
 # export BASE_MODEL='/home/sp2583/rlvr/distill_qwen_1.5b'
-export BASE_MODEL='/home/sp2583/rlvr/Qwen2.5-3B-Instruct'
+export BASE_MODEL='/home/sp2583/rlvr/Qwen3-4B-Base'
 # export BASE_MODEL='/home/sp2583/rlvr/outputs/confidence_after_answer_plausible/qwen3_trylongbasic_1e-6/global_step_200/actor'
 
 N_GPUS=2
@@ -17,17 +17,17 @@ TOTAL_EPOCHS=1
 SAVE_STEPS=50
 EVAL_STEPS=5
 
-LR=3e-6
+LR=1
 
-EXPERIMENT_NAME="qwen3_3e-6_0_or_1"
+EXPERIMENT_NAME="qwen3_base_0_or_1"
 PROJECT_NAME='confidence_after_answer_plausible'
 
 
 python3 -m verl.trainer.main_ppo \
  algorithm.adv_estimator=grpo \
  +algorithm.std_norm=True \
- data.train_files=$HOME/rlvr/rlcr_pqa_0or1_train.parquet \
- data.val_files=$HOME/rlvr/rlcr_pqa_0or1_validation.parquet \
+ data.train_files=$HOME/rlvr/rlcr_pqa_nothink_0or1_train.parquet \
+ data.val_files=$HOME/rlvr/rlcr_pqa_nothink_0or1_validation.parquet \
  data.train_batch_size=32 \
  data.val_batch_size=256 \
  data.max_prompt_length=3072 \
