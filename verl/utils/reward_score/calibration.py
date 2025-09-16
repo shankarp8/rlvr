@@ -139,11 +139,11 @@ def compute_score(data_source, solution_str, ground_truth, extra_info=None, hpar
     print(think_cnt, answer_cnt, confidence_cnt)
 
     format_bonus = 1.0
-    if not (think_cnt == 1) or not (answer_cnt == 1) or not (confidence_cnt == 1):
-        format_bonus = 0.0
-
-    # if not (think_cnt == 1) or not (answer_cnt == 1):
+    # if not (think_cnt == 1) or not (answer_cnt == 1) or not (confidence_cnt == 1):
     #     format_bonus = 0.0
+
+    if not (confidence_cnt == 1) or not (answer_cnt == 1):
+        format_bonus = 0.0
 
     length = None
     if length_penalty and format_bonus == 1.0:
@@ -215,9 +215,9 @@ def compute_score(data_source, solution_str, ground_truth, extra_info=None, hpar
     if not length_penalty and not parallel_confidence:
         print('NORMAL')
 
-        w_acc = 0.35
-        w_base = 0.35
-        w_format = 0.3
+        w_acc = 0.2
+        w_base = 0.4
+        w_format = 0.4
 
         score =  w_acc * acc + w_base * base_reward + w_format * format_bonus + confidence_pen
         score = max(-1.0, min(1.0, score))
