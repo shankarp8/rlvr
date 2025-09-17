@@ -19,7 +19,7 @@ EVAL_STEPS=5
 
 LR=1e-6
 
-EXPERIMENT_NAME="qwen3_base_0_or_1_balanced"
+EXPERIMENT_NAME="qwen3_base_normal_balanced"
 PROJECT_NAME='confidence_after_answer_plausible'
 
 
