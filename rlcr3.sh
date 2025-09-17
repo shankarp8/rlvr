@@ -18,17 +18,17 @@ TOTAL_EPOCHS=1
 SAVE_STEPS=50
 EVAL_STEPS=5
 
-LR=1e-6
+LR=2e-6
 
-EXPERIMENT_NAME="qwen3_0or1_1e-6"
+EXPERIMENT_NAME="qwen3_0or1_2e-6_balanced"
 PROJECT_NAME='confidence_after_answer_plausible'
 
 
 python3 -m verl.trainer.main_ppo \
  algorithm.adv_estimator=grpo \
  +algorithm.std_norm=True \
- data.train_files=$HOME/rlvr/rlcr_pqa_nothink_0or1_train.parquet \
- data.val_files=$HOME/rlvr/rlcr_pqa_nothink_0or1_validation.parquet \
+ data.train_files=$HOME/rlvr/rlcr_pqa_nothink_balanced_0or1_train.parquet \
+ data.val_files=$HOME/rlvr/rlcr_pqa_nothink_balanced_0or1_validation.parquet \
  data.train_batch_size=32 \
  data.val_batch_size=256 \
  data.max_prompt_length=3072 \
