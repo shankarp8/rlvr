@@ -20,7 +20,7 @@ EVAL_STEPS=5
 
 LR=2e-6
 
-EXPERIMENT_NAME="gemma2b_0or1_2e-6_full"
+EXPERIMENT_NAME="qwen3b_0or1_2e-6_full"
 PROJECT_NAME='confidence_after_answer_plausible'
 
 
