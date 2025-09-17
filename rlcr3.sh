@@ -27,8 +27,8 @@ PROJECT_NAME='confidence_after_answer_plausible'
 python3 -m verl.trainer.main_ppo \
  algorithm.adv_estimator=grpo \
  +algorithm.std_norm=True \
- data.train_files=$HOME/rlvr/rlcr_pqa_nothink_0or1_balanced_train.parquet \
- data.val_files=$HOME/rlvr/rlcr_pqa_nothink_0or1_balanced_validation.parquet \
+ data.train_files=$HOME/rlvr/rlcr_pqa_clast_kinda_balanced_train2.parquet \
+ data.val_files=$HOME/rlvr/rlcr_pqa_clast_kinda_balanced_validation2.parquet \
  data.train_batch_size=32 \
  data.val_batch_size=256 \
  data.max_prompt_length=3072 \
