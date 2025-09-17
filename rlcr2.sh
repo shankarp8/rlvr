@@ -1,33 +1,34 @@
+#!/bin/bash
 set -x
 
 
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=0,1
 export VLLM_ATTENTION_BACKEND=XFORMERS
 export CHECKPOINTS_DIR="./outputs"
 # export BASE_MODEL="/home/sp2583/rlvr/Qwen3-4B-Thinking"
 # export BASE_MODEL='/home/sp2583/rlvr/distill_qwen_1.5b'
-export BASE_MODEL='/home/sp2583/rlvr/Qwen2.5-3B-Instruct'
+export BASE_MODEL='/home/sp2583/rlvr/gemma-2b'
 # export BASE_MODEL='/home/sp2583/rlvr/outputs/confidence_after_answer_plausible/qwen3_trylongbasic_1e-6/global_step_200/actor'
 
-N_GPUS=1
-ROLLOUT_N=16
+N_GPUS=2
+ROLLOUT_N=32
 MAX_LENGTH=2048
 TENSOR_MODEL_PARALLEL_SIZE=1
-TOTAL_EPOCHS=1
-SAVE_STEPS=50
+TOTAL_EPOCHS=5
+SAVE_STEPS=150
 EVAL_STEPS=5
 
-LR=1e-6
+LR=2e-6
 
-EXPERIMENT_NAME="qwen3_basic_no_stdnorm_1e-6_higher_temp"
+EXPERIMENT_NAME="gemma2b_0or1_2e-6_balanced"
 PROJECT_NAME='confidence_after_answer_plausible'
 
 
 python3 -m verl.trainer.main_ppo \
  algorithm.adv_estimator=grpo \
- +algorithm.std_norm=False \
- data.train_files=$HOME/rlvr/rlcr_pqa_train.parquet \
- data.val_files=$HOME/rlvr/rlcr_pqa_validation.parquet \
+ +algorithm.std_norm=True \
+ data.train_files=$HOME/rlvr/rlcr_pqa_nothink_balanced_0or1_train.parquet \
+ data.val_files=$HOME/rlvr/rlcr_pqa_nothink_balanced_0or1_validation.parquet \
  data.train_batch_size=32 \
  data.val_batch_size=256 \
  data.max_prompt_length=3072 \
@@ -48,7 +49,7 @@ python3 -m verl.trainer.main_ppo \
  actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
  actor_rollout_ref.rollout.tensor_model_parallel_size=$TENSOR_MODEL_PARALLEL_SIZE \
  actor_rollout_ref.rollout.name=vllm \
- actor_rollout_ref.rollout.temperature=1.3 \
+ actor_rollout_ref.rollout.temperature=1.0 \
  +actor_rollout_ref.rollout.val_temperature=0.5 \
  actor_rollout_ref.rollout.max_num_batched_tokens=16384 \
  actor_rollout_ref.rollout.gpu_memory_utilization=0.6 \
@@ -68,6 +69,6 @@ python3 -m verl.trainer.main_ppo \
  trainer.test_freq=$EVAL_STEPS \
  trainer.total_epochs=$TOTAL_EPOCHS \
  +trainer.vary_confidence=False \
- +trainer.parallel_confidence=True \
+ +trainer.parallel_confidence=False \
  +trainer.num_duplicated_rollouts=1
 
