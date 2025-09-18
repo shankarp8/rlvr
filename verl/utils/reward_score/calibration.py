@@ -217,9 +217,9 @@ def compute_score(data_source, solution_str, ground_truth, extra_info=None, hpar
     if not length_penalty and not parallel_confidence:
         print('NORMAL')
 
-        w_acc = 0.2
-        w_base = 0.4
-        w_format = 0.4
+        w_acc = 0.5
+        w_base = 1.0
+        w_format = 1.0
 
         score =  w_acc * acc + w_base * base_reward + w_format * format_bonus + confidence_pen
         score = max(-1.0, min(1.0, score))
