@@ -5,13 +5,13 @@ set -x
 export CUDA_VISIBLE_DEVICES=0,1
 export VLLM_ATTENTION_BACKEND=XFORMERS
 export CHECKPOINTS_DIR="./outputs"
-# export BASE_MODEL="/home/sp2583/rlvr/Qwen3-4B-Thinking"
+export BASE_MODEL="/home/sp2583/rlvr/Qwen3-4B-Instruct"
 # export BASE_MODEL='/home/sp2583/rlvr/distill_qwen_1.5b'
-export BASE_MODEL='/home/sp2583/rlvr/gemma-2b-it'
+# export BASE_MODEL='/home/sp2583/rlvr/gemma-2b-it'
 # export BASE_MODEL='/home/sp2583/rlvr/outputs/confidence_after_answer_plausible/qwen3_trylongbasic_1e-6/global_step_200/actor'
 
 N_GPUS=2
-ROLLOUT_N=24
+ROLLOUT_N=16
 MAX_LENGTH=2048
 TENSOR_MODEL_PARALLEL_SIZE=1
 TOTAL_EPOCHS=5
@@ -20,7 +20,7 @@ EVAL_STEPS=5
 
 LR=2e-6
 
-EXPERIMENT_NAME="qwen3b_0or1_2e-6_full"
+EXPERIMENT_NAME="qwen3_4b_0or1_2e-6_full"
 PROJECT_NAME='confidence_after_answer_plausible'
 
 
@@ -46,7 +46,7 @@ python3 -m verl.trainer.main_ppo \
  actor_rollout_ref.model.enable_gradient_checkpointing=True \
  actor_rollout_ref.actor.fsdp_config.param_offload=False \
  +actor_rollout_ref.actor.fsdp_config.grad_offload=False \
- actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
+ actor_rollout_ref.actor.fsdp_config.optimizer_offload=True \
  actor_rollout_ref.rollout.tensor_model_parallel_size=$TENSOR_MODEL_PARALLEL_SIZE \
  actor_rollout_ref.rollout.name=vllm \
  actor_rollout_ref.rollout.temperature=1.0 \
