@@ -830,7 +830,7 @@ class RayPPOTrainer(object):
                 out.append((mean, cnt))
             return out
 
-        def summarize_component_records(component_records, prefix="reward_components"):
+        def summarize_component_records(component_records, prefix="reward_components_validation"):
             if not component_records:
                 return {}
 
@@ -971,18 +971,18 @@ class RayPPOTrainer(object):
                 self.validation_accuracy_by_source[data_source] = {}
             self.validation_accuracy_by_source[data_source][self.global_steps] = mean_reward
 
-        metric_dict.update(summarize_component_records(component_records_all, prefix="reward_components"))
+        metric_dict.update(summarize_component_records(component_records_all, prefix="reward_components_validation"))
 
-        if component_records_all:
-            per_source_components = {}
-            for i, cr in enumerate(component_records_all):
-                src = data_sources[i] if i < len(data_sources) else 'unknown'
-                per_source_components.setdefault(src, []).append(cr)
+        # if component_records_all:
+        #     per_source_components = {}
+        #     for i, cr in enumerate(component_records_all):
+        #         src = data_sources[i] if i < len(data_sources) else 'unknown'
+        #         per_source_components.setdefault(src, []).append(cr)
 
-            for src, cr_list in per_source_components.items():
-                metric_dict.update(
-                    summarize_component_records(cr_list, prefix=f"reward_components_by_source/{src}")
-                )
+        #     for src, cr_list in per_source_components.items():
+        #         metric_dict.update(
+        #             summarize_component_records(cr_list, prefix=f"reward_components_by_source/{src}")
+        #         )
 
         return metric_dict
 
