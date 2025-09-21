@@ -141,11 +141,11 @@ def compute_score(data_source, solution_str, ground_truth, extra_info=None, hpar
     print(think_cnt, answer_cnt, confidence_cnt)
 
     format_bonus = 1.0
-    # if not (think_cnt == 1) or not (answer_cnt == 1) or not (confidence_cnt == 1):
-    #     format_bonus = 0.0
-
-    if not (confidence_cnt == 1) or not (answer_cnt == 1):
+    if not (think_cnt == 1) or not (answer_cnt == 1) or not (confidence_cnt == 1):
         format_bonus = 0.0
+
+    # if not (confidence_cnt == 1) or not (answer_cnt == 1):
+    #     format_bonus = 0.0
 
     length = None
     if length_penalty and format_bonus == 1.0:
@@ -238,8 +238,8 @@ def compute_score(data_source, solution_str, ground_truth, extra_info=None, hpar
     
     else:
         w_acc = 0.0
-        w_base = 0.2
-        w_format = 0.2
+        w_base = 1.0
+        w_format = 1.0
         answer_record = extra_info['answer_record']
         num_sampled = answer_record.get(pred_answer, 0)
         consistency = num_sampled / sum(list(answer_record.values()))
@@ -248,11 +248,12 @@ def compute_score(data_source, solution_str, ground_truth, extra_info=None, hpar
         print('CONSISTENCY', consistency)
         eps = 1e-3
         q_clip = min(max(q, eps), 1 - eps)
-        base_reward = consistency * math.log(q_clip) + (1 - consistency) * math.log(1 - q_clip)
+        base_reward = - (q - consistency) ** 2
+        # base_reward = consistency * math.log(q_clip) + (1 - consistency) * math.log(1 - q_clip)
         print('CONSISTENCY REWARD', base_reward)
 
         score =  w_acc * acc + w_base * base_reward + w_format * format_bonus + confidence_pen
-        score = max(-1.0, min(1.0, score))
+        # score = max(-1.0, min(1.0, score))
 
 
         
