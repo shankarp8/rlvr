@@ -6,7 +6,7 @@ export VLLM_ATTENTION_BACKEND=XFORMERS
 export CHECKPOINTS_DIR="./outputs"
 # export BASE_MODEL="/home/sp2583/rlvr/Qwen3-4B-Thinking"
 # export BASE_MODEL='/home/sp2583/rlvr/distill_qwen_1.5b'
-export BASE_MODEL='$(RLVR_REPO)/outputs/confidence_after_answer_plausible/qwen3_base_normal_balanced/global_step_325/actor'
+export BASE_MODEL='$(RLVR_REPO)/Qwen2.5-3B' # base model
 # export BASE_MODEL='/home/sp2583/rlvr/outputs/confidence_after_answer_plausible/qwen3_trylongbasic_1e-6/global_step_200/actor'
 
 N_GPUS=2
@@ -17,7 +17,7 @@ TOTAL_EPOCHS=5
 SAVE_STEPS=50
 EVAL_STEPS=5
 
-LR=1e-6
+LR=2e-6
 
 EXPERIMENT_NAME="qwen3_base_normal_balanced"
 PROJECT_NAME='confidence_after_answer_plausible'
@@ -26,8 +26,8 @@ PROJECT_NAME='confidence_after_answer_plausible'
 python3 -m verl.trainer.main_ppo \
  algorithm.adv_estimator=grpo \
  +algorithm.std_norm=False \
- data.train_files=$HOME/rlvr/rlcr_pqa_clast_kinda_balanced_train2.parquet \
- data.val_files=$HOME/rlvr/rlcr_pqa_clast_kinda_balanced_validation2.parquet \
+ data.train_files=$HOME/rlvr/rlcr_pqa_train_new.parquet \
+ data.val_files=$HOME/rlvr/rlcr_pqa_validation_new.parquet \
  data.train_batch_size=32 \
  data.val_batch_size=256 \
  data.max_prompt_length=3072 \
@@ -68,6 +68,6 @@ python3 -m verl.trainer.main_ppo \
  trainer.test_freq=$EVAL_STEPS \
  trainer.total_epochs=$TOTAL_EPOCHS \
  +trainer.vary_confidence=False \
- +trainer.parallel_confidence=False \
+ +trainer.parallel_confidence=True \
  +trainer.num_duplicated_rollouts=1
 
